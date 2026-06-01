@@ -1,0 +1,163 @@
+### Market Data API — VS Code REST Client
+### Extensão: humao.rest-client
+### Execute a API antes de disparar as requisições.
+
+@baseUrl = http://localhost:3333
+@symbol = PETR4
+@secondarySymbol = VALE3
+@fundSymbol = KNCR11
+
+### Health check — valida API e conexão PostgreSQL
+GET {{baseUrl}}/health
+Accept: application/json
+
+### ------------------------------------------------------------
+### Cotações compatíveis com Brapi
+### ------------------------------------------------------------
+
+### Cotação atual de um ativo com histórico mensal diário
+GET {{baseUrl}}/api/quote/{{symbol}}?range=1mo&interval=1d
+Accept: application/json
+
+### Cotação de múltiplos ativos
+GET {{baseUrl}}/api/quote/{{symbol}},{{secondarySymbol}},{{fundSymbol}}?range=1mo&interval=1d
+Accept: application/json
+
+### Histórico anual diário com dividendos, quando disponíveis na fonte
+GET {{baseUrl}}/api/quote/{{symbol}}?range=1y&interval=1d&dividends=true
+Accept: application/json
+
+### Consulta por período informado
+GET {{baseUrl}}/api/quote/{{symbol}}?startDate=2026-01-01&endDate=2026-05-27&interval=1d
+Accept: application/json
+
+### Intervalo de 15 minutos para inspeção intraday
+GET {{baseUrl}}/api/quote/{{symbol}}?range=1d&interval=15m
+Accept: application/json
+
+### ------------------------------------------------------------
+### Ativos monitorados — persistidos no PostgreSQL
+### ------------------------------------------------------------
+
+### Listar ativos monitorados
+GET {{baseUrl}}/api/monitored
+Accept: application/json
+
+### Adicionar um ativo sem remover os existentes
+POST {{baseUrl}}/api/monitored
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbol": "{{symbol}}"
+}
+
+### Adicionar vários ativos sem remover os existentes
+POST {{baseUrl}}/api/monitored
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{symbol}}", "{{secondarySymbol}}", "{{fundSymbol}}"]
+}
+
+### Sincronizar lista completa monitorada
+### ATENÇÃO: ativos ausentes desta lista serão removidos do monitoramento.
+PUT {{baseUrl}}/api/monitored
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{symbol}}", "{{secondarySymbol}}", "{{fundSymbol}}"]
+}
+
+### Remover um ativo do monitoramento
+DELETE {{baseUrl}}/api/monitored/{{secondarySymbol}}
+Accept: application/json
+
+### Limpar todos os ativos monitorados
+### ATENÇÃO: remove toda a lista de monitoramento do banco.
+PUT {{baseUrl}}/api/monitored
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": []
+}
+
+### ------------------------------------------------------------
+### Atualização manual e snapshots salvos
+### ------------------------------------------------------------
+
+### Forçar coleta imediata de todos os ativos monitorados
+POST {{baseUrl}}/api/monitored/refresh
+Accept: application/json
+
+### Consultar últimos snapshots coletados de um ativo
+GET {{baseUrl}}/api/snapshots/{{symbol}}?limit=100
+Accept: application/json
+
+### Consultar até 10.000 snapshots para exportação/análise
+GET {{baseUrl}}/api/snapshots/{{symbol}}?limit=10000
+Accept: application/json
+
+### Consultar snapshots coletados de múltiplos ativos informados
+GET {{baseUrl}}/api/snapshots?symbols={{symbol}},{{secondarySymbol}},{{fundSymbol}}&limit=100
+Accept: application/json
+
+### Consultar snapshots de todos os ativos monitorados no banco
+GET {{baseUrl}}/api/snapshots?limit=100
+Accept: application/json
+
+### ------------------------------------------------------------
+### Fundamentos complementares e documentos oficiais de FIIs
+### ------------------------------------------------------------
+
+@fiiSymbol = CACR11
+@fiiSecondarySymbol = IRDM11
+@documentId = 1
+
+### Indicadores complementares obtidos do Fundamentus
+GET {{baseUrl}}/api/fundamentals/{{fiiSymbol}}
+Accept: application/json
+
+### Sincronizar documentos oficiais de FIIs via CVM Dados Abertos e FundosNet/B3
+POST {{baseUrl}}/api/documents/sync
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}", "{{fiiSecondarySymbol}}"]
+}
+
+### Sincronizar documentos dos FIIs já monitorados
+POST {{baseUrl}}/api/documents/sync
+Content-Type: application/json
+Accept: application/json
+
+{}
+
+### Listar documentos oficiais de um FII
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=cvm_open_data
+Accept: application/json
+
+### Listar documentos recentes para consumo futuro pelo investment-agent
+GET {{baseUrl}}/api/documents?symbols={{fiiSymbol}},{{fiiSecondarySymbol}}&limit=20
+Accept: application/json
+
+### Abrir documento com conteúdo estruturado extraído
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}/{{documentId}}
+Accept: application/json
+
+
+### Listar somente PDFs oficiais obtidos do FundosNet/B3
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3
+Accept: application/json
+
+### Listar relatórios gerenciais oficiais disponíveis para análise do agente
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=fii_management_report
+Accept: application/json
+
+### Listar fatos relevantes oficiais
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=material_fact
+Accept: application/json

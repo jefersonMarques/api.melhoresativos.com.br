@@ -1,0 +1,21 @@
+{
+  "name": "market-data-api",
+  "version": "1.5.0",
+  "description": "Brapi-compatible market data API with official CVM and FundosNet/B3 FII document synchronization and PostgreSQL persistence.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:migrate": "node scripts/migrate.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/modules/storage/postgres-market.repository.js && node --test"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
