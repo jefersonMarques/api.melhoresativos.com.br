@@ -3,10 +3,11 @@ import { createCacheKey } from "./quote-query.js";
 import { extractOfficialFiiMetrics } from "../fundamentals/fii-official-metrics.service.js";
 
 export class QuotesService {
-  constructor({ repository, yahooProvider, fundamentusProvider, config }) {
+  constructor({ repository, yahooProvider, fundamentusProvider, logosService = null, config }) {
     this.repository = repository;
     this.yahooProvider = yahooProvider;
     this.fundamentusProvider = fundamentusProvider;
+    this.logosService = logosService;
     this.config = config;
   }
 
@@ -83,7 +84,8 @@ export class QuotesService {
     try {
       const rawQuote = await this.yahooProvider.fetchQuote(symbol, query);
       const fundamentals = await this.#getFundamentals(symbol);
-      const quote = toBrapiQuote(rawQuote, fundamentals);
+      const logoUrl = await this.#getLogoUrl(symbol);
+      const quote = toBrapiQuote(rawQuote, fundamentals, logoUrl);
 
       await Promise.all([
         this.repository.setCachedQuote(key, {
@@ -101,7 +103,8 @@ export class QuotesService {
       if (!query.includeHistory && this.config.fundamentusEnabled && this.fundamentusProvider?.fetchQuote) {
         try {
           const fallback = await this.fundamentusProvider.fetchQuote(symbol);
-          const quote = toBrapiQuote(fallback.quote, fallback.fundamentals);
+          const logoUrl = await this.#getLogoUrl(symbol);
+          const quote = toBrapiQuote(fallback.quote, fallback.fundamentals, logoUrl);
           await Promise.all([
             this.repository.setCachedQuote(key, { quote, fetchedAt: new Date().toISOString() }),
             this.repository.addSnapshot(symbol, quote)
@@ -112,6 +115,19 @@ export class QuotesService {
         }
       }
       throw error;
+    }
+  }
+
+  async #getLogoUrl(symbol) {
+    if (!this.logosService) {
+      return null;
+    }
+
+    try {
+      return await this.logosService.getLogoUrl(symbol);
+    } catch (error) {
+      console.warn(`[market-data-api] Logo indisponível para ${symbol}: ${error.message}`);
+      return null;
     }
   }
 
