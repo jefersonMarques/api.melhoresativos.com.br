@@ -31,7 +31,7 @@ try {
   const logosService = new LogosService({
     repository,
     brapiLogoProvider: new BrapiLogoProvider({
-      baseUrl: config.brapiBaseUrl,
+      baseUrl: process.env.BRAPI_LOGO_BASE_URL ?? 'https://brapi.dev',
       token: config.brapiToken,
       timeoutMs: config.requestTimeoutMs
     }),
