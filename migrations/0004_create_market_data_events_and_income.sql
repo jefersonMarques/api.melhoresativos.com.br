@@ -15,9 +15,11 @@ CREATE TABLE IF NOT EXISTS market_data_asset_events (
   sentiment VARCHAR(20),
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (symbol, event_type, source, source_document_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS market_data_asset_events_unique_source_idx
+  ON market_data_asset_events (symbol, event_type, source, COALESCE(source_document_id, ''));
 
 CREATE INDEX IF NOT EXISTS market_data_asset_events_symbol_event_date_idx
   ON market_data_asset_events (symbol, event_date DESC NULLS LAST, published_at DESC NULLS LAST);
@@ -40,9 +42,11 @@ CREATE TABLE IF NOT EXISTS market_data_asset_income (
   source_url TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (symbol, income_type, amount, COALESCE(payment_date, reference_date, com_date), source, COALESCE(source_document_id, ''))
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS market_data_asset_income_unique_source_idx
+  ON market_data_asset_income (symbol, income_type, amount, COALESCE(payment_date, reference_date, com_date), source, COALESCE(source_document_id, ''));
 
 CREATE INDEX IF NOT EXISTS market_data_asset_income_symbol_payment_idx
   ON market_data_asset_income (symbol, payment_date DESC NULLS LAST, reference_date DESC NULLS LAST);
