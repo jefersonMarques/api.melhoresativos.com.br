@@ -43,7 +43,8 @@ export function createApp({ config, repository, quotesService, scheduler, docume
       const fundamentalsMatch = url.pathname.match(/^\/api\/fundamentals\/([^/]+)$/);
       if (request.method === "GET" && fundamentalsMatch) {
         const symbol = normalizeSymbol(decodeURIComponent(fundamentalsMatch[1]));
-        return sendJson(response, 200, await quotesService.getFundamentals(symbol));
+        const fundamentals = await quotesService.getFundamentals(symbol);
+        return sendJson(response, 200, await withLogo(fundamentals));
       }
 
       if (logosService && request.method === "GET" && url.pathname === "/api/logos") {
@@ -83,42 +84,60 @@ export function createApp({ config, repository, quotesService, scheduler, docume
           throw new AppError(400, "BAD_REQUEST", "Nenhum FII informado ou monitorado para sincronização");
         }
         const results = documentScheduler ? await documentScheduler.run(symbols) : await documentsService.sync(symbols);
-        return sendJson(response, 202, { results });
+        return sendJson(response, 202, { results: await withLogos(results) });
       }
 
       if (documentsService && request.method === "GET" && url.pathname === "/api/documents") {
         const symbols = parseSymbols(url.searchParams.get("symbols") ?? "", config.documentMaxSymbolsPerRun);
         const filters = parseDocumentFilters(url.searchParams, config.documentMaxResults);
-        return sendJson(response, 200, { documents: await documentsService.listRecent(symbols, filters) });
+        const documents = await documentsService.listRecent(symbols, filters);
+        return sendJson(response, 200, { documents: await withLogos(documents) });
       }
 
       const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)(?:\/([0-9]+))?$/);
       if (documentsService && request.method === "GET" && documentMatch) {
         const symbol = normalizeSymbol(decodeURIComponent(documentMatch[1]));
         if (documentMatch[2]) {
-          return sendJson(response, 200, await documentsService.get(symbol, documentMatch[2]));
+          return sendJson(response, 200, await withLogo(await documentsService.get(symbol, documentMatch[2]), symbol));
         }
-        return sendJson(response, 200, await documentsService.list(symbol, parseDocumentFilters(url.searchParams, config.documentMaxResults)));
+        const documents = await documentsService.list(symbol, parseDocumentFilters(url.searchParams, config.documentMaxResults));
+        return sendJson(response, 200, await withLogos(documents, symbol));
       }
 
       if (request.method === "GET" && url.pathname === "/api/monitored") {
-        return sendJson(response, 200, { symbols: await repository.listMonitored() });
+        const symbols = await repository.listMonitored();
+        return sendJson(response, 200, {
+          symbols,
+          assets: await withLogos(symbols.map((symbol) => ({ symbol })))
+        });
       }
 
       if (request.method === "POST" && url.pathname === "/api/monitored") {
         const symbols = await readMonitoredSymbols(request, config.maxTickers);
-        return sendJson(response, 201, { symbols: await repository.addMonitored(symbols) });
+        const updatedSymbols = await repository.addMonitored(symbols);
+        return sendJson(response, 201, {
+          symbols: updatedSymbols,
+          assets: await withLogos(updatedSymbols.map((symbol) => ({ symbol })))
+        });
       }
 
       if (request.method === "PUT" && url.pathname === "/api/monitored") {
         const symbols = await readMonitoredSymbols(request, config.maxTickers, true);
-        return sendJson(response, 200, { symbols: await repository.replaceMonitored(symbols) });
+        const updatedSymbols = await repository.replaceMonitored(symbols);
+        return sendJson(response, 200, {
+          symbols: updatedSymbols,
+          assets: await withLogos(updatedSymbols.map((symbol) => ({ symbol })))
+        });
       }
 
       const monitoredMatch = url.pathname.match(/^\/api\/monitored\/([^/]+)$/);
       if (request.method === "DELETE" && monitoredMatch) {
         const symbol = normalizeSymbol(decodeURIComponent(monitoredMatch[1]));
-        return sendJson(response, 200, { symbols: await repository.removeMonitored(symbol) });
+        const updatedSymbols = await repository.removeMonitored(symbol);
+        return sendJson(response, 200, {
+          symbols: updatedSymbols,
+          assets: await withLogos(updatedSymbols.map((item) => ({ symbol: item })))
+        });
       }
 
       if (request.method === "GET" && url.pathname === "/api/snapshots") {
@@ -128,14 +147,17 @@ export function createApp({ config, repository, quotesService, scheduler, docume
           : await repository.listMonitored();
         const limit = parseSnapshotLimit(url.searchParams.get("limit"));
         const results = await repository.getSnapshotsBySymbols(symbols, limit);
-        return sendJson(response, 200, { results });
+        return sendJson(response, 200, { results: await withLogos(results) });
       }
 
       const snapshotsMatch = url.pathname.match(/^\/api\/snapshots\/([^/]+)$/);
       if (request.method === "GET" && snapshotsMatch) {
         const symbol = normalizeSymbol(decodeURIComponent(snapshotsMatch[1]));
         const limit = parseSnapshotLimit(url.searchParams.get("limit"));
-        return sendJson(response, 200, { symbol, snapshots: await repository.getSnapshots(symbol, limit) });
+        return sendJson(response, 200, await withLogo({
+          symbol,
+          snapshots: await repository.getSnapshots(symbol, limit)
+        }));
       }
 
       if (request.method === "POST" && url.pathname === "/api/monitored/refresh") {
@@ -149,6 +171,34 @@ export function createApp({ config, repository, quotesService, scheduler, docume
       sendJson(response, result.statusCode, result.body);
     }
   };
+
+  async function withLogo(item, fallbackSymbol = null) {
+    if (!item || !logosService) {
+      return item;
+    }
+
+    const symbol = fallbackSymbol ?? item.symbol;
+    if (!symbol) {
+      return item;
+    }
+
+    try {
+      return {
+        ...item,
+        logourl: await logosService.getLogoUrl(symbol)
+      };
+    } catch (error) {
+      console.warn(`[market-data-api] Logo indisponível para ${symbol}: ${error.message}`);
+      return {
+        ...item,
+        logourl: null
+      };
+    }
+  }
+
+  async function withLogos(items, fallbackSymbol = null) {
+    return Promise.all(items.map((item) => withLogo(item, fallbackSymbol)));
+  }
 }
 
 function sendJson(response, statusCode, body) {
