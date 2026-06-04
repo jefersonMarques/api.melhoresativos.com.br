@@ -37,6 +37,20 @@ export class PostgresMarketRepository {
     );
   }
 
+  async invalidateCachedQuotes(symbols) {
+    if (!symbols.length) {
+      return 0;
+    }
+
+    const result = await this.pool.query(
+      `DELETE FROM market_data_quote_cache
+       WHERE symbol = ANY($1::varchar[])`,
+      [symbols]
+    );
+
+    return result.rowCount;
+  }
+
   async getFundamentals(symbol) {
     const result = await this.pool.query(
       `SELECT metrics, fetched_at
