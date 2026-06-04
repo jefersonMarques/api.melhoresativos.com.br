@@ -85,12 +85,12 @@ export function createApp({
       }
 
       if (incomeService && request.method === "GET" && url.pathname === "/api/income") {
-        const symbols = parseSymbols(url.searchParams.get("symbols") ?? "", config.maxTickers);
+        const symbols = parseOptionalSymbols(url.searchParams.get("symbols"), config.maxTickers);
         return sendJson(response, 200, { income: await incomeService.listMany(symbols, parseIncomeFilters(url.searchParams)) });
       }
 
       if (eventsService && request.method === "GET" && url.pathname === "/api/events") {
-        const symbols = parseSymbols(url.searchParams.get("symbols") ?? "", config.maxTickers);
+        const symbols = parseOptionalSymbols(url.searchParams.get("symbols"), config.maxTickers);
         return sendJson(response, 200, { events: await eventsService.list(parseEventFilters(url.searchParams, symbols)) });
       }
 
@@ -342,6 +342,10 @@ async function readMonitoredSymbols(request, maximumSymbols, allowEmpty = false)
   }
 
   return parseSymbols(requestedSymbols.join(","), maximumSymbols);
+}
+
+function parseOptionalSymbols(rawSymbols, maximumSymbols) {
+  return rawSymbols ? parseSymbols(rawSymbols, maximumSymbols) : [];
 }
 
 function parseSnapshotLimit(rawLimit) {
