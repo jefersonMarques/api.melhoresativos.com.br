@@ -34,16 +34,16 @@ export class LogosService {
     const fromBrapi = await this.#tryBrapiLogo(normalizedSymbol);
 
     if (fromBrapi) {
-      return this.repository.setAssetLogo(fromBrapi);
+      return this.#saveLogo(fromBrapi);
     }
 
     const fromTradingView = await this.#tryTradingViewLogo(normalizedSymbol);
 
     if (fromTradingView) {
-      return this.repository.setAssetLogo(fromTradingView);
+      return this.#saveLogo(fromTradingView);
     }
 
-    return this.repository.setAssetLogo({
+    return this.#saveLogo({
       symbol: normalizedSymbol,
       logoUrl: null,
       svgContent: createDefaultLogoSvg(normalizedSymbol),
@@ -75,6 +75,12 @@ export class LogosService {
 
   async listLogos() {
     return this.repository.listAssetLogos();
+  }
+
+  async #saveLogo(value) {
+    const logo = await this.repository.setAssetLogo(value);
+    await this.repository.invalidateCachedQuotes?.([logo.symbol]);
+    return logo;
   }
 
   async #tryBrapiLogo(symbol) {
