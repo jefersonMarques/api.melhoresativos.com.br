@@ -5,8 +5,9 @@ import { createConfig, loadEnvFile } from "./config/env.js";
 import { createDatabasePool } from "./database/client.js";
 import { runMigrations } from "./database/migrate.js";
 import { LogosService } from "./modules/logos/logos.service.js";
-import { MonitorScheduler } from "./modules/monitoring/monitor.scheduler.js";
 import { DocumentScheduler } from "./modules/monitoring/document.scheduler.js";
+import { LogoScheduler } from "./modules/monitoring/logo.scheduler.js";
+import { MonitorScheduler } from "./modules/monitoring/monitor.scheduler.js";
 import { DocumentsService } from "./modules/documents/documents.service.js";
 import { PdfTextExtractor } from "./modules/documents/pdf-text.extractor.js";
 import { BrapiLogoProvider } from "./modules/providers/brapi-logo.provider.js";
@@ -102,10 +103,17 @@ const documentScheduler = new DocumentScheduler({
   enabled: config.documentSyncEnabled && (config.cvmFiiEnabled || config.fnetFiiEnabled),
   maxSymbolsPerRun: config.documentMaxSymbolsPerRun
 });
+const logoScheduler = new LogoScheduler({
+  logosService,
+  intervalMs: config.logoSyncIntervalMs,
+  enabled: config.logoSyncEnabled,
+  maxSymbolsPerRun: config.logoSyncMaxSymbolsPerRun
+});
 
 const server = createServer(createApp({ config, repository, quotesService, scheduler, documentsService, documentScheduler, logosService }));
 scheduler.start();
 documentScheduler.start();
+logoScheduler.start();
 
 server.listen(config.port, config.host, async () => {
   const monitoredSymbols = await repository.listMonitored();
@@ -119,11 +127,17 @@ server.listen(config.port, config.host, async () => {
       console.warn(`[market-data-api] Primeira sincronização documental falhou: ${error.message}`);
     });
   }
+  if (config.logoSyncEnabled) {
+    logoScheduler.run().catch((error) => {
+      console.warn(`[market-data-api] Primeira sincronização de logos falhou: ${error.message}`);
+    });
+  }
 });
 
 async function shutdown() {
   scheduler.stop();
   documentScheduler.stop();
+  logoScheduler.stop();
   await new Promise((resolveClose) => server.close(resolveClose));
   await pool.end();
   process.exit(0);
