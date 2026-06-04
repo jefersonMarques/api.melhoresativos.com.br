@@ -73,6 +73,36 @@ export class LogosService {
     return results;
   }
 
+  async syncMarketLogos({ maxSymbols = 50 } = {}) {
+    if (!this.tradingViewLogoProvider?.fetchLogoRecords) {
+      return {
+        status: 'skipped',
+        reason: 'tradingview_provider_unavailable',
+        candidates: 0,
+        synced: 0,
+        results: []
+      };
+    }
+
+    const marketRecords = await this.tradingViewLogoProvider.fetchLogoRecords({ limit: 5000 });
+    const marketSymbols = [...new Set(marketRecords.map((record) => normalizeSymbol(record.symbol)).filter(Boolean))];
+    const cachedLogos = await this.repository.listAssetLogos();
+    const cachedBySymbol = new Map(cachedLogos.map((logo) => [logo.symbol, logo]));
+    const candidates = marketSymbols
+      .filter((symbol) => shouldSyncMarketLogo(cachedBySymbol.get(symbol), this.config.logoTtlMs))
+      .slice(0, maxSymbols);
+
+    const results = await this.syncLogos(candidates);
+
+    return {
+      status: 'completed',
+      candidates: candidates.length,
+      marketSymbols: marketSymbols.length,
+      synced: results.filter((result) => result.status === 'synced').length,
+      results
+    };
+  }
+
   async listLogos() {
     return this.repository.listAssetLogos();
   }
@@ -157,4 +187,16 @@ function normalizeSymbol(symbol) {
 
 function isFresh(timestamp, ttlMs) {
   return Date.now() - new Date(timestamp).getTime() < ttlMs;
+}
+
+function shouldSyncMarketLogo(logo, ttlMs) {
+  if (!logo) {
+    return true;
+  }
+
+  if (logo.source === DEFAULT_LOGO_SOURCE) {
+    return true;
+  }
+
+  return !isFresh(logo.checkedAt, ttlMs);
 }
