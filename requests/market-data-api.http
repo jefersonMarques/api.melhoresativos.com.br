@@ -162,7 +162,11 @@ Accept: application/json
 GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=material_fact
 Accept: application/json
 
-### Listar LOGOS
+### ------------------------------------------------------------
+### Logos — SVG persistido no PostgreSQL
+### ------------------------------------------------------------
+
+### Sincronizar logos dos ativos informados
 POST {{baseUrl}}/api/logos/sync
 Content-Type: application/json
 Accept: application/json
@@ -171,6 +175,127 @@ Accept: application/json
   "symbols": ["PASS3", "{{secondarySymbol}}", "{{fundSymbol}}"]
 }
 
-### Pegar LOGO de um ativo
+### Listar logos salvas no banco
+GET {{baseUrl}}/api/logos
+Accept: application/json
+
+### Pegar SVG de um ativo
 GET {{baseUrl}}/api/logos/{{symbol}}
 Accept: image/svg+xml, image/png, image/jpeg, image/webp, image/*;q=0.8, */*;q=0.5
+
+### ------------------------------------------------------------
+### Perfil consolidado do ativo
+### ------------------------------------------------------------
+
+### Profile de ação — cotação, fundamentos, logo, documentos, eventos e valuation
+GET {{baseUrl}}/api/assets/{{symbol}}/profile
+Accept: application/json
+
+### Profile de FII — cotação, fundamentos, logo, documentos, eventos e valuation
+GET {{baseUrl}}/api/assets/{{fundSymbol}}/profile
+Accept: application/json
+
+### ------------------------------------------------------------
+### Contexto para IA — factual, sem recomendação automática
+### ------------------------------------------------------------
+
+### Contexto para IA de um ativo
+GET {{baseUrl}}/api/assets/{{symbol}}/ai-context
+Accept: application/json
+
+### Contexto para IA de um FII
+GET {{baseUrl}}/api/assets/{{fundSymbol}}/ai-context
+Accept: application/json
+
+### Contexto para IA em lote
+POST {{baseUrl}}/api/ai-context
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{symbol}}", "{{secondarySymbol}}", "{{fundSymbol}}"]
+}
+
+### ------------------------------------------------------------
+### Valuation factual — Bazin, Graham e referências de FIIs
+### ------------------------------------------------------------
+
+### Valuation de ação — Bazin e Graham
+GET {{baseUrl}}/api/valuation/{{symbol}}
+Accept: application/json
+
+### Valuation de FII — rendimento e referência por P/VP
+GET {{baseUrl}}/api/valuation/{{fundSymbol}}
+Accept: application/json
+
+### ------------------------------------------------------------
+### Eventos, comunicados e calendário normalizado
+### ------------------------------------------------------------
+
+### Sincronizar eventos a partir dos documentos já salvos
+POST {{baseUrl}}/api/events/sync
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}", "{{fiiSecondarySymbol}}"]
+}
+
+### Sincronizar eventos dos ativos monitorados
+POST {{baseUrl}}/api/events/sync
+Content-Type: application/json
+Accept: application/json
+
+{}
+
+### Listar eventos recentes de todos os ativos
+GET {{baseUrl}}/api/events?limit=50
+Accept: application/json
+
+### Listar eventos recentes de ativos específicos
+GET {{baseUrl}}/api/events?symbols={{symbol}},{{secondarySymbol}},{{fundSymbol}}&limit=50
+Accept: application/json
+
+### Listar eventos por período
+GET {{baseUrl}}/api/events?symbols={{fundSymbol}}&from=2026-01-01&to=2026-12-31&limit=100
+Accept: application/json
+
+### Listar eventos de um ativo
+GET {{baseUrl}}/api/assets/{{fundSymbol}}/events?limit=50
+Accept: application/json
+
+### ------------------------------------------------------------
+### Proventos normalizados — base para Bazin e análise de renda
+### ------------------------------------------------------------
+
+### Resumo de proventos de um ativo
+GET {{baseUrl}}/api/income/{{symbol}}?years=5&limit=120
+Accept: application/json
+
+### Resumo de proventos de um FII
+GET {{baseUrl}}/api/income/{{fundSymbol}}?years=5&limit=120
+Accept: application/json
+
+### Listar proventos de múltiplos ativos
+GET {{baseUrl}}/api/income?symbols={{symbol}},{{secondarySymbol}},{{fundSymbol}}&limit=120
+Accept: application/json
+
+### ------------------------------------------------------------
+### Qualidade dos dados — diagnóstico de completude
+### ------------------------------------------------------------
+
+### Diagnóstico de qualidade de dados de um ativo
+GET {{baseUrl}}/api/data-quality/{{symbol}}
+Accept: application/json
+
+### Diagnóstico de qualidade de dados de um FII
+GET {{baseUrl}}/api/data-quality/{{fundSymbol}}
+Accept: application/json
+
+### Diagnóstico de qualidade dos ativos monitorados
+GET {{baseUrl}}/api/data-quality
+Accept: application/json
+
+### Diagnóstico de qualidade de ativos específicos
+GET {{baseUrl}}/api/data-quality?symbols={{symbol}},{{secondarySymbol}},{{fundSymbol}}
+Accept: application/json
