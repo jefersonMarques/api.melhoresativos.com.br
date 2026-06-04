@@ -67,12 +67,13 @@ export class IncomeService {
   }
 
   async upsertIncome(value) {
+    const dedupKey = createIncomeDedupKey(value);
     const result = await this.repository.pool.query(
       `INSERT INTO market_data_asset_income (
          symbol, income_type, amount, com_date, ex_date, payment_date,
-         reference_date, declared_at, source, source_document_id, source_url, metadata
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
-       ON CONFLICT (symbol, income_type, amount, COALESCE(payment_date, reference_date, com_date), source, COALESCE(source_document_id, '')) DO UPDATE SET
+         reference_date, declared_at, source, source_document_id, source_url, dedup_key, metadata
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+       ON CONFLICT (symbol, dedup_key) DO UPDATE SET
          com_date = EXCLUDED.com_date,
          ex_date = EXCLUDED.ex_date,
          payment_date = EXCLUDED.payment_date,
@@ -96,6 +97,7 @@ export class IncomeService {
         value.source,
         value.sourceDocumentId ?? null,
         value.sourceUrl ?? null,
+        dedupKey,
         JSON.stringify(value.metadata ?? {})
       ]
     );
@@ -124,6 +126,16 @@ function sumSince(income, months) {
     if (!date || new Date(date) < since) return sum;
     return sum + Number(item.amount);
   }, 0);
+}
+
+function createIncomeDedupKey(value) {
+  return [
+    value.incomeType,
+    value.amount,
+    value.paymentDate ?? value.referenceDate ?? value.comDate ?? '',
+    value.source,
+    value.sourceDocumentId ?? ''
+  ].join(':');
 }
 
 function toIncome(row) {
