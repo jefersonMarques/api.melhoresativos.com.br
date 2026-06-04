@@ -2,7 +2,7 @@ import { AppError, toErrorResponse } from "./core/errors.js";
 import { readJsonBody } from "./core/http.js";
 import { parseQuoteQuery, parseSymbols, normalizeSymbol } from "./modules/quotes/quote-query.js";
 
-export function createApp({ config, repository, quotesService, scheduler, documentsService = null, documentScheduler = null }) {
+export function createApp({ config, repository, quotesService, scheduler, documentsService = null, documentScheduler = null, logosService = null }) {
   const limiter = createRateLimiter(config.rateLimitWindowMs, config.rateLimitMaxRequests);
 
   return async function handler(request, response) {
@@ -44,6 +44,31 @@ export function createApp({ config, repository, quotesService, scheduler, docume
       if (request.method === "GET" && fundamentalsMatch) {
         const symbol = normalizeSymbol(decodeURIComponent(fundamentalsMatch[1]));
         return sendJson(response, 200, await quotesService.getFundamentals(symbol));
+      }
+
+      if (logosService && request.method === "GET" && url.pathname === "/api/logos") {
+        const logos = await logosService.listLogos();
+        return sendJson(response, 200, {
+          logos: logos.map(({ svgContent, ...logo }) => ({ ...logo, hasSvgContent: Boolean(svgContent) }))
+        });
+      }
+
+      if (logosService && request.method === "POST" && url.pathname === "/api/logos/sync") {
+        const body = await readJsonBody(request);
+        const symbols = Array.isArray(body.symbols) && body.symbols.length
+          ? parseSymbols(body.symbols.join(","), config.maxTickers)
+          : await repository.listMonitored();
+        if (!symbols.length) {
+          throw new AppError(400, "BAD_REQUEST", "Nenhum ativo informado ou monitorado para sincronização de logos");
+        }
+        return sendJson(response, 202, { results: await logosService.syncLogos(symbols) });
+      }
+
+      const logoMatch = url.pathname.match(/^\/api\/logos\/([^/]+)$/);
+      if (logosService && request.method === "GET" && logoMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(logoMatch[1]));
+        const logo = await logosService.getLogo(symbol);
+        return sendSvg(response, logo.svgContent);
       }
 
       if (documentsService && request.method === "POST" && url.pathname === "/api/documents/sync") {
@@ -131,6 +156,14 @@ function sendJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
+function sendSvg(response, svgContent) {
+  response.writeHead(200, {
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "public, max-age=86400"
+  });
+  response.end(svgContent);
+}
+
 function setCorsHeaders(request, response, allowedOrigins) {
   const origin = request.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
@@ -188,7 +221,6 @@ function parseSnapshotLimit(rawLimit) {
   }
   return limit;
 }
-
 
 function parseDocumentFilters(searchParams, maximumLimit) {
   const rawLimit = searchParams.get("limit");
