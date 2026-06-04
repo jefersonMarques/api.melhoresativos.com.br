@@ -42,7 +42,7 @@ const fundamentusProvider = new FundamentusProvider({
   timeoutMs: config.requestTimeoutMs
 });
 const brapiLogoProvider = new BrapiLogoProvider({
-  baseUrl: config.brapiBaseUrl,
+  baseUrl: process.env.BRAPI_LOGO_BASE_URL ?? "https://brapi.dev",
   token: config.brapiToken,
   timeoutMs: config.requestTimeoutMs
 });
