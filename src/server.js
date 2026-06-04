@@ -4,12 +4,17 @@ import { createApp } from "./app.js";
 import { createConfig, loadEnvFile } from "./config/env.js";
 import { createDatabasePool } from "./database/client.js";
 import { runMigrations } from "./database/migrate.js";
+import { AiContextService } from "./modules/ai-context/ai-context.service.js";
+import { AssetsService } from "./modules/assets/assets.service.js";
+import { DataQualityService } from "./modules/data-quality/data-quality.service.js";
+import { DocumentsService } from "./modules/documents/documents.service.js";
+import { PdfTextExtractor } from "./modules/documents/pdf-text.extractor.js";
+import { EventsService } from "./modules/events/events.service.js";
+import { IncomeService } from "./modules/income/income.service.js";
 import { LogosService } from "./modules/logos/logos.service.js";
 import { DocumentScheduler } from "./modules/monitoring/document.scheduler.js";
 import { LogoScheduler } from "./modules/monitoring/logo.scheduler.js";
 import { MonitorScheduler } from "./modules/monitoring/monitor.scheduler.js";
-import { DocumentsService } from "./modules/documents/documents.service.js";
-import { PdfTextExtractor } from "./modules/documents/pdf-text.extractor.js";
 import { BrapiLogoProvider } from "./modules/providers/brapi-logo.provider.js";
 import { CvmFiiProvider } from "./modules/providers/cvm-fii.provider.js";
 import { BrFiisFnetDiscoveryProvider } from "./modules/providers/brfiis-fnet-discovery.provider.js";
@@ -19,6 +24,7 @@ import { TradingViewLogoProvider } from "./modules/providers/tradingview-logo.pr
 import { YahooFinanceProvider } from "./modules/providers/yahoo-finance.provider.js";
 import { QuotesService } from "./modules/quotes/quotes.service.js";
 import { PostgresMarketRepository } from "./modules/storage/postgres-market.repository.js";
+import { ValuationService } from "./modules/valuation/valuation.service.js";
 
 await loadEnvFile();
 const config = createConfig();
@@ -91,6 +97,35 @@ const quotesService = new QuotesService({
   logosService,
   config
 });
+const eventsService = new EventsService({ repository });
+const incomeService = new IncomeService({ repository });
+const valuationService = new ValuationService({
+  quotesService,
+  incomeService,
+  config
+});
+const assetsService = new AssetsService({
+  repository,
+  quotesService,
+  logosService,
+  documentsService,
+  eventsService,
+  valuationService
+});
+const dataQualityService = new DataQualityService({
+  repository,
+  quotesService,
+  logosService,
+  documentsService,
+  eventsService,
+  incomeService
+});
+const aiContextService = new AiContextService({
+  assetsService,
+  incomeService,
+  eventsService,
+  dataQualityService
+});
 const scheduler = new MonitorScheduler({
   repository,
   quotesService,
@@ -110,7 +145,21 @@ const logoScheduler = new LogoScheduler({
   maxSymbolsPerRun: config.logoSyncMaxSymbolsPerRun
 });
 
-const server = createServer(createApp({ config, repository, quotesService, scheduler, documentsService, documentScheduler, logosService }));
+const server = createServer(createApp({
+  config,
+  repository,
+  quotesService,
+  scheduler,
+  documentsService,
+  documentScheduler,
+  logosService,
+  assetsService,
+  aiContextService,
+  dataQualityService,
+  eventsService,
+  incomeService,
+  valuationService
+}));
 scheduler.start();
 documentScheduler.start();
 logoScheduler.start();
