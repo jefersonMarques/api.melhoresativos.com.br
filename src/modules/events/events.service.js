@@ -40,13 +40,14 @@ export class EventsService {
   }
 
   async upsertEvent(event) {
+    const dedupKey = createEventDedupKey(event);
     const result = await this.repository.pool.query(
       `INSERT INTO market_data_asset_events (
          symbol, event_type, title, event_date, published_at, reference_date,
          source, source_document_id, source_url, summary, raw_text, importance,
-         sentiment, metadata
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
-       ON CONFLICT (symbol, event_type, source, COALESCE(source_document_id, '')) DO UPDATE SET
+         sentiment, dedup_key, metadata
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
+       ON CONFLICT (symbol, dedup_key) DO UPDATE SET
          title = EXCLUDED.title,
          event_date = EXCLUDED.event_date,
          published_at = EXCLUDED.published_at,
@@ -75,6 +76,7 @@ export class EventsService {
         event.rawText ?? null,
         event.importance ?? 'medium',
         event.sentiment ?? 'neutral',
+        dedupKey,
         JSON.stringify(event.metadata ?? {})
       ]
     );
@@ -131,6 +133,15 @@ function inferImportance(eventType) {
   if (eventType === 'material_fact') return 'high';
   if (['income_announcement', 'subscription_issuance', 'shareholder_meeting'].includes(eventType)) return 'medium';
   return 'low';
+}
+
+function createEventDedupKey(event) {
+  return [
+    event.eventType,
+    event.source,
+    event.sourceDocumentId ?? event.title,
+    event.referenceDate ?? event.eventDate ?? event.publishedAt ?? ''
+  ].join(':');
 }
 
 function toEvent(row) {
