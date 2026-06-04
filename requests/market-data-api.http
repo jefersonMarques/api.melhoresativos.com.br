@@ -163,10 +163,14 @@ GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=ma
 Accept: application/json
 
 ### Listar LOGOS
-POST {{baseUrl}}/api/logos/synce
+POST {{baseUrl}}/api/logos/sync
 Content-Type: application/json
 Accept: application/json
 
 {
-  "symbols": ["{{symbol}}", "{{secondarySymbol}}", "{{fundSymbol}}"]
+  "symbols": ["PASS3", "{{secondarySymbol}}", "{{fundSymbol}}"]
 }
+
+### Pegar LOGO de um ativo
+GET {{baseUrl}}/api/logos/{{symbol}}
+Accept: image/svg+xml, image/png, image/jpeg, image/webp, image/*;q=0.8, */*;q=0.5
