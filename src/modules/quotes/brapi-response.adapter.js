@@ -1,4 +1,4 @@
-export function toBrapiQuote(quote, fundamentals = null) {
+export function toBrapiQuote(quote, fundamentals = null, logoUrl = null) {
   const dayHigh = quote.regularMarketDayHigh ?? null;
   const dayLow = quote.regularMarketDayLow ?? null;
   const weekLow = quote.fiftyTwoWeekLow ?? null;
@@ -26,7 +26,7 @@ export function toBrapiQuote(quote, fundamentals = null) {
     fiftyTwoWeekHigh: weekHigh,
     priceEarnings: fundamentals?.priceEarnings ?? quote.priceEarnings ?? null,
     earningsPerShare: fundamentals?.earningsPerShare ?? quote.earningsPerShare ?? null,
-    logourl: null,
+    logourl: logoUrl,
     ...(quote.historicalDataPrice ? { historicalDataPrice: quote.historicalDataPrice } : {}),
     ...(quote.dividendsData ? { dividendsData: quote.dividendsData } : {})
   };
