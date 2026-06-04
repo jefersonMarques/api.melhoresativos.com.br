@@ -237,6 +237,51 @@ export class PostgresMarketRepository {
     return toAssetRegistry(result.rows[0]);
   }
 
+  async getAssetLogo(symbol) {
+    const result = await this.pool.query(
+      `SELECT symbol, logo_url, svg_content, source, source_symbol, source_metadata, checked_at
+       FROM market_data_asset_logos
+       WHERE symbol = $1`,
+      [symbol]
+    );
+    return result.rows[0] ? toAssetLogo(result.rows[0]) : null;
+  }
+
+  async setAssetLogo(value) {
+    const result = await this.pool.query(
+      `INSERT INTO market_data_asset_logos (
+         symbol, logo_url, svg_content, source, source_symbol, source_metadata, checked_at
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
+       ON CONFLICT (symbol) DO UPDATE SET
+         logo_url = EXCLUDED.logo_url,
+         svg_content = EXCLUDED.svg_content,
+         source = EXCLUDED.source,
+         source_symbol = EXCLUDED.source_symbol,
+         source_metadata = EXCLUDED.source_metadata,
+         checked_at = EXCLUDED.checked_at,
+         updated_at = NOW()
+       RETURNING symbol, logo_url, svg_content, source, source_symbol, source_metadata, checked_at`,
+      [
+        value.symbol,
+        value.logoUrl ?? null,
+        value.svgContent,
+        value.source,
+        value.sourceSymbol ?? null,
+        JSON.stringify(value.sourceMetadata ?? {})
+      ]
+    );
+    return toAssetLogo(result.rows[0]);
+  }
+
+  async listAssetLogos() {
+    const result = await this.pool.query(
+      `SELECT symbol, logo_url, svg_content, source, source_symbol, source_metadata, checked_at
+       FROM market_data_asset_logos
+       ORDER BY symbol ASC`
+    );
+    return result.rows.map(toAssetLogo);
+  }
+
   async upsertDocument(document) {
     const result = await this.pool.query(
       `INSERT INTO market_data_documents (
@@ -349,7 +394,6 @@ export class PostgresMarketRepository {
     );
     return result.rows[0] ? toDocumentDetail(result.rows[0]) : null;
   }
-
 }
 
 function toSnapshot(row) {
@@ -369,6 +413,17 @@ function toNumber(value) {
   return value === null || value === undefined ? null : Number(value);
 }
 
+function toAssetLogo(row) {
+  return {
+    symbol: row.symbol,
+    logoUrl: row.logo_url,
+    svgContent: row.svg_content,
+    source: row.source,
+    sourceSymbol: row.source_symbol,
+    sourceMetadata: row.source_metadata,
+    checkedAt: row.checked_at?.toISOString?.() ?? row.checked_at ?? null
+  };
+}
 
 function toAssetRegistry(row) {
   return {
