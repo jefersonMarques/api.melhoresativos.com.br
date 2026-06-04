@@ -4,14 +4,17 @@ import { createApp } from "./app.js";
 import { createConfig, loadEnvFile } from "./config/env.js";
 import { createDatabasePool } from "./database/client.js";
 import { runMigrations } from "./database/migrate.js";
+import { LogosService } from "./modules/logos/logos.service.js";
 import { MonitorScheduler } from "./modules/monitoring/monitor.scheduler.js";
 import { DocumentScheduler } from "./modules/monitoring/document.scheduler.js";
 import { DocumentsService } from "./modules/documents/documents.service.js";
 import { PdfTextExtractor } from "./modules/documents/pdf-text.extractor.js";
+import { BrapiLogoProvider } from "./modules/providers/brapi-logo.provider.js";
 import { CvmFiiProvider } from "./modules/providers/cvm-fii.provider.js";
 import { BrFiisFnetDiscoveryProvider } from "./modules/providers/brfiis-fnet-discovery.provider.js";
 import { FnetFiiProvider } from "./modules/providers/fnet-fii.provider.js";
 import { FundamentusProvider } from "./modules/providers/fundamentus.provider.js";
+import { TradingViewLogoProvider } from "./modules/providers/tradingview-logo.provider.js";
 import { YahooFinanceProvider } from "./modules/providers/yahoo-finance.provider.js";
 import { QuotesService } from "./modules/quotes/quotes.service.js";
 import { PostgresMarketRepository } from "./modules/storage/postgres-market.repository.js";
@@ -37,6 +40,21 @@ const yahooProvider = new YahooFinanceProvider({
 const fundamentusProvider = new FundamentusProvider({
   baseUrl: config.fundamentusBaseUrl,
   timeoutMs: config.requestTimeoutMs
+});
+const brapiLogoProvider = new BrapiLogoProvider({
+  baseUrl: config.brapiBaseUrl,
+  token: config.brapiToken,
+  timeoutMs: config.requestTimeoutMs
+});
+const tradingViewLogoProvider = new TradingViewLogoProvider({
+  scannerBaseUrl: config.tradingViewScannerBaseUrl,
+  timeoutMs: config.requestTimeoutMs
+});
+const logosService = new LogosService({
+  repository,
+  brapiLogoProvider,
+  tradingViewLogoProvider,
+  config
 });
 const cvmFiiProvider = new CvmFiiProvider({
   baseUrl: config.cvmOpenDataBaseUrl,
@@ -69,6 +87,7 @@ const quotesService = new QuotesService({
   repository,
   yahooProvider,
   fundamentusProvider,
+  logosService,
   config
 });
 const scheduler = new MonitorScheduler({
@@ -84,7 +103,7 @@ const documentScheduler = new DocumentScheduler({
   maxSymbolsPerRun: config.documentMaxSymbolsPerRun
 });
 
-const server = createServer(createApp({ config, repository, quotesService, scheduler, documentsService, documentScheduler }));
+const server = createServer(createApp({ config, repository, quotesService, scheduler, documentsService, documentScheduler, logosService }));
 scheduler.start();
 documentScheduler.start();
 
