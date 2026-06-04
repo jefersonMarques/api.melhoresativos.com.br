@@ -161,3 +161,12 @@ Accept: application/json
 ### Listar fatos relevantes oficiais
 GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=material_fact
 Accept: application/json
+
+### Listar LOGOS
+POST {{baseUrl}}/api/logos/synce
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{symbol}}", "{{secondarySymbol}}", "{{fundSymbol}}"]
+}
