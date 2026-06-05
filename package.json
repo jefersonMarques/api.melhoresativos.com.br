@@ -12,7 +12,7 @@
     "db:migrate": "node scripts/migrate.js",
     "logos:sync": "node src/scripts/sync-tradingview-logos.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/app.js && node --check src/modules/storage/postgres-market.repository.js && node --check src/scripts/sync-tradingview-logos.js && node --test"
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/modules/storage/postgres-market.repository.js && node --check src/modules/assets/assets.service.js && node --check src/modules/ai-context/ai-context.service.js && node --check src/modules/data-quality/data-quality.service.js && node --check src/modules/events/events.service.js && node --check src/modules/income/income.service.js && node --check src/modules/valuation/valuation.service.js && node --check src/scripts/sync-tradingview-logos.js && node --test"
   },
   "dependencies": {
     "pg": "^8.16.3"

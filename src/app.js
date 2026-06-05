@@ -2,7 +2,21 @@ import { AppError, toErrorResponse } from "./core/errors.js";
 import { readJsonBody } from "./core/http.js";
 import { parseQuoteQuery, parseSymbols, normalizeSymbol } from "./modules/quotes/quote-query.js";
 
-export function createApp({ config, repository, quotesService, scheduler, documentsService = null, documentScheduler = null, logosService = null }) {
+export function createApp({
+  config,
+  repository,
+  quotesService,
+  scheduler,
+  documentsService = null,
+  documentScheduler = null,
+  logosService = null,
+  assetsService = null,
+  aiContextService = null,
+  dataQualityService = null,
+  eventsService = null,
+  incomeService = null,
+  valuationService = null
+}) {
   const limiter = createRateLimiter(config.rateLimitWindowMs, config.rateLimitMaxRequests);
 
   return async function handler(request, response) {
@@ -38,6 +52,72 @@ export function createApp({ config, repository, quotesService, scheduler, docume
         }
         const { isStale, ...body } = result;
         return sendJson(response, 200, body);
+      }
+
+      const assetProfileMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/profile$/);
+      if (assetsService && request.method === "GET" && assetProfileMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(assetProfileMatch[1]));
+        return sendJson(response, 200, await assetsService.getProfile(symbol));
+      }
+
+      const assetAiContextMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/ai-context$/);
+      if (aiContextService && request.method === "GET" && assetAiContextMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(assetAiContextMatch[1]));
+        return sendJson(response, 200, await aiContextService.get(symbol));
+      }
+
+      if (aiContextService && request.method === "POST" && url.pathname === "/api/ai-context") {
+        const body = await readJsonBody(request);
+        const symbols = parseSymbols((body.symbols ?? []).join(","), config.maxTickers);
+        return sendJson(response, 200, { results: await aiContextService.getMany(symbols) });
+      }
+
+      const valuationMatch = url.pathname.match(/^\/api\/valuation\/([^/]+)$/);
+      if (valuationService && request.method === "GET" && valuationMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(valuationMatch[1]));
+        return sendJson(response, 200, await valuationService.evaluate(symbol));
+      }
+
+      const incomeMatch = url.pathname.match(/^\/api\/income\/([^/]+)$/);
+      if (incomeService && request.method === "GET" && incomeMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(incomeMatch[1]));
+        return sendJson(response, 200, await incomeService.summary(symbol, parseIncomeFilters(url.searchParams)));
+      }
+
+      if (incomeService && request.method === "GET" && url.pathname === "/api/income") {
+        const symbols = parseOptionalSymbols(url.searchParams.get("symbols"), config.maxTickers);
+        return sendJson(response, 200, { income: await incomeService.listMany(symbols, parseIncomeFilters(url.searchParams)) });
+      }
+
+      if (eventsService && request.method === "GET" && url.pathname === "/api/events") {
+        const symbols = parseOptionalSymbols(url.searchParams.get("symbols"), config.maxTickers);
+        return sendJson(response, 200, { events: await eventsService.list(parseEventFilters(url.searchParams, symbols)) });
+      }
+
+      if (eventsService && request.method === "POST" && url.pathname === "/api/events/sync") {
+        const body = await readJsonBody(request);
+        const symbols = Array.isArray(body.symbols) && body.symbols.length
+          ? parseSymbols(body.symbols.join(","), config.maxTickers)
+          : await repository.listMonitored();
+        return sendJson(response, 202, await eventsService.syncFromDocuments(symbols));
+      }
+
+      const assetEventsMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/events$/);
+      if (eventsService && request.method === "GET" && assetEventsMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(assetEventsMatch[1]));
+        return sendJson(response, 200, { symbol, events: await eventsService.listBySymbol(symbol, parseEventFilters(url.searchParams)) });
+      }
+
+      const dataQualityMatch = url.pathname.match(/^\/api\/data-quality\/([^/]+)$/);
+      if (dataQualityService && request.method === "GET" && dataQualityMatch) {
+        const symbol = normalizeSymbol(decodeURIComponent(dataQualityMatch[1]));
+        return sendJson(response, 200, await dataQualityService.get(symbol));
+      }
+
+      if (dataQualityService && request.method === "GET" && url.pathname === "/api/data-quality") {
+        const requestedSymbols = url.searchParams.get("symbols");
+        const symbols = requestedSymbols ? parseSymbols(requestedSymbols, config.maxTickers) : await repository.listMonitored();
+        return sendJson(response, 200, { results: await dataQualityService.list(symbols) });
       }
 
       const fundamentalsMatch = url.pathname.match(/^\/api\/fundamentals\/([^/]+)$/);
@@ -197,6 +277,10 @@ export function createApp({ config, repository, quotesService, scheduler, docume
   }
 
   async function withLogos(items, fallbackSymbol = null) {
+    if (!Array.isArray(items)) {
+      return withLogo(items, fallbackSymbol);
+    }
+
     return Promise.all(items.map((item) => withLogo(item, fallbackSymbol)));
   }
 }
@@ -264,6 +348,10 @@ async function readMonitoredSymbols(request, maximumSymbols, allowEmpty = false)
   return parseSymbols(requestedSymbols.join(","), maximumSymbols);
 }
 
+function parseOptionalSymbols(rawSymbols, maximumSymbols) {
+  return rawSymbols ? parseSymbols(rawSymbols, maximumSymbols) : [];
+}
+
 function parseSnapshotLimit(rawLimit) {
   const limit = rawLimit === null ? 100 : Number(rawLimit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) {
@@ -283,4 +371,37 @@ function parseDocumentFilters(searchParams, maximumLimit) {
     throw new AppError(400, "BAD_REQUEST", "since deve estar no formato YYYY-MM-DD");
   }
   return { type: searchParams.get("type"), source: searchParams.get("source"), limit, since };
+}
+
+function parseEventFilters(searchParams, symbols = []) {
+  const limit = parseSimpleLimit(searchParams.get("limit"), 50, 500);
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+
+  assertDateFilter(from, "from");
+  assertDateFilter(to, "to");
+
+  return { symbols, from, to, limit };
+}
+
+function parseIncomeFilters(searchParams) {
+  return {
+    limit: parseSimpleLimit(searchParams.get("limit"), 120, 1000),
+    years: parseSimpleLimit(searchParams.get("years"), 5, 30)
+  };
+}
+
+function parseSimpleLimit(rawLimit, fallback, maximum) {
+  if (rawLimit === null) return fallback;
+  const limit = Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > maximum) {
+    throw new AppError(400, "BAD_REQUEST", `limit deve ser um número inteiro entre 1 e ${maximum}`);
+  }
+  return limit;
+}
+
+function assertDateFilter(value, fieldName) {
+  if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new AppError(400, "BAD_REQUEST", `${fieldName} deve estar no formato YYYY-MM-DD`);
+  }
 }
