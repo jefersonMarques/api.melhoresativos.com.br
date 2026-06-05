@@ -277,6 +277,10 @@ export function createApp({
   }
 
   async function withLogos(items, fallbackSymbol = null) {
+    if (!Array.isArray(items)) {
+      return withLogo(items, fallbackSymbol);
+    }
+
     return Promise.all(items.map((item) => withLogo(item, fallbackSymbol)));
   }
 }
