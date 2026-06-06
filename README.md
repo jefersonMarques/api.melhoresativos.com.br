@@ -281,7 +281,61 @@ Para extrair o texto dos PDFs do FundosNet/B3, o servidor precisa ter `pdftotext
 sudo apt-get update && sudo apt-get install -y poppler-utils
 ```
 
+Em Windows local, instale uma build compilada do Poppler e valide se o binário está no `PATH`:
+
+```powershell
+Get-Command pdftotext
+pdftotext -v
+```
+
+O pacote `poppler` do Chocolatey pode instalar apenas o código-fonte, sem `pdftotext.exe`. Nesse caso, use outra distribuição compilada, como Scoop, ou informe o caminho absoluto do executável no `.env`:
+
+```env
+PDF_TEXT_EXTRACTOR_BINARY=C:\tools\poppler\Library\bin\pdftotext.exe
+```
+
 Se o binário não estiver disponível, o documento oficial ainda é persistido com URL e hash, mas o conteúdo ficará com `extractionStatus: "unsupported"` até nova sincronização em ambiente preparado.
+
+#### Diagnóstico manual da extração de PDF
+
+No PowerShell, prefira `Invoke-RestMethod` ou `curl.exe`. O alias `curl` do PowerShell aponta para `Invoke-WebRequest` e não aceita as mesmas flags do cURL Linux.
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:3333/api/documents/sync" `
+  -ContentType "application/json" `
+  -Body '{"symbols":["CACR11"]}'
+```
+
+Também é possível usar `curl.exe` com `--%` para evitar erro de escape do JSON no PowerShell:
+
+```powershell
+curl.exe -X POST "http://localhost:3333/api/documents/sync" -H "Content-Type: application/json" --% -d "{\"symbols\":[\"CACR11\"]}"
+```
+
+Para verificar o status de extração dos documentos:
+
+```powershell
+$response = Invoke-RestMethod `
+  -Method Get `
+  -Uri "http://localhost:3333/api/documents/CACR11?limit=20&source=fundosnet_b3"
+
+$response.documents | Select-Object id, sourceDocumentId, processingStatus, processingError, extractionStatus
+```
+
+Quando `processingError` indicar `PDF extractor not available: pdftotext`, o problema é dependência local ausente ou `PDF_TEXT_EXTRACTOR_BINARY` apontando para um binário inexistente.
+
+Quando o arquivo baixado não começar com `%PDF`, o problema não é o Poppler. A fonte externa retornou HTML, erro ou página de manutenção. Para validar manualmente:
+
+```powershell
+curl.exe -L -D headers.txt "https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?cvm=true&id=1198836" -o report.pdf
+Get-Content .\headers.txt
+Format-Hex .\report.pdf -Count 20
+Get-Content .\report.pdf -TotalCount 20
+```
+
+Um PDF válido começa com `%PDF`. Se o arquivo iniciar com `<html>` ou contiver título como `Sistema indisponível`, a FNET/B3 está indisponível ou devolvendo página intermediária. Nessa situação, a sincronização deve ser reexecutada quando a fonte voltar; não se deve tratar o HTML como PDF nem interpretar o erro como falha da camada de extração.
 
 Por padrão, a sincronização automática fica desativada durante homologação. Para habilitar o scheduler independente de documentos, use `DOCUMENT_SYNC_ENABLED=true`.
 
@@ -352,6 +406,7 @@ A resposta marca explicitamente `source: "fundamentus"`; esses dados não são t
 ### Limitações operacionais
 
 - A pesquisa oficial do FundosNet/B3 apresenta captcha. Por isso a descoberta automática de IDs depende de um índice público configurável, enquanto a evidência armazenada permanece o PDF original B3.
+- Links oficiais do FundosNet/B3 podem retornar HTML temporário, página de manutenção ou indisponibilidade. Valide o arquivo baixado antes da extração; um PDF real deve iniciar com `%PDF`.
 - PDFs digitalizados sem camada textual não são processados por OCR; ficam disponíveis como documento oficial, mas com extração não suportada.
 - A integração com o `investment-agent` ainda deve ser feita para que documentos novos elevem a confiança, gerem resumo e disparem recomendações/alertas.
 
