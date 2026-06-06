@@ -43,7 +43,7 @@ export class FnetFiiProvider {
           },
           processingStatus: content.extractionStatus === "failed" ? "failed" : content.extractionStatus,
           processingError: content.extractionError ?? null,
-          content
+          content: invalidPdfContent ? undefined : content
         });
       } catch (error) {
         failures.push({ sourceUrl: officialUrl, message: error.message });
