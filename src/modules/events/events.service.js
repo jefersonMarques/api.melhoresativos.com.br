@@ -134,34 +134,114 @@ function mapDocumentToEvent(document) {
 }
 
 function extractIncomeFromDocument(document) {
+  const rawText = getDocumentRawText(document);
+
+  if (document.source === 'cvm_open_data') {
+    return extractIncomeFromStructuredReport(document, rawText);
+  }
+
   if (document.documentType !== 'income_announcement') {
     return [];
   }
 
-  const rawText = getDocumentRawText(document);
   const amount = findIncomeAmount(rawText);
   if (!amount) {
     return [];
   }
 
-  return [{
-    symbol: document.symbol,
-    incomeType: inferIncomeType(document, rawText),
+  return [createIncomeEntry({
+    document,
     amount,
+    incomeType: inferIncomeType(document, rawText),
     comDate: findDateByLabels(rawText, ['data com', 'com direito', 'posição', 'posicao', 'cotistas em']),
     exDate: findDateByLabels(rawText, ['data ex', 'ex-rendimento', 'ex rendimento', 'ex-dividendo', 'ex dividendo', 'a partir de']),
     paymentDate: findDateByLabels(rawText, ['pagamento', 'data do pagamento', 'data de pagamento']),
-    referenceDate: document.referenceDate,
+    extractionMethod: 'document_text_pattern'
+  })];
+}
+
+function extractIncomeFromStructuredReport(document, rawText) {
+  const rows = parseStructuredRows(rawText);
+  return rows.map((row, index) => {
+    const amount = findRowIncomeAmount(row);
+    if (!amount) return null;
+
+    return createIncomeEntry({
+      document,
+      amount,
+      incomeType: findRowIncomeType(row),
+      comDate: findRowDate(row, ['COM', 'DATA_BASE', 'POSICAO', 'POSIÇÃO', 'COTISTA']),
+      exDate: findRowDate(row, ['EX']),
+      paymentDate: findRowDate(row, ['PAGAMENTO', 'PAGTO', 'PAG']),
+      referenceDate: findRowDate(row, ['REFERENCIA', 'REFERÊNCIA', 'COMPETENCIA', 'COMPETÊNCIA']) ?? document.referenceDate,
+      rowIndex: index,
+      extractionMethod: 'cvm_structured_report'
+    });
+  }).filter(Boolean);
+}
+
+function createIncomeEntry({ document, amount, incomeType, comDate, exDate, paymentDate, referenceDate, rowIndex = null, extractionMethod }) {
+  return {
+    symbol: document.symbol,
+    incomeType,
+    amount,
+    comDate: comDate ?? null,
+    exDate: exDate ?? null,
+    paymentDate: paymentDate ?? null,
+    referenceDate: referenceDate ?? document.referenceDate,
     declaredAt: document.publishedAt,
     source: document.source,
-    sourceDocumentId: document.sourceDocumentId,
+    sourceDocumentId: rowIndex === null ? document.sourceDocumentId : `${document.sourceDocumentId}:row:${rowIndex}`,
     sourceUrl: document.sourceUrl,
     metadata: {
       sourceDocumentType: document.documentType,
       documentId: document.id,
-      extractionMethod: 'document_text_pattern'
+      extractionMethod
     }
-  }];
+  };
+}
+
+function parseStructuredRows(rawText) {
+  if (!rawText) return [];
+  try {
+    const parsed = JSON.parse(rawText);
+    return Array.isArray(parsed?.rows) ? parsed.rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function findRowIncomeAmount(row) {
+  const entries = Object.entries(row ?? {});
+  const preferred = entries.find(([key, value]) => {
+    const name = normalizeKey(key);
+    return isIncomeAmountKey(name) && parseFlexibleNumber(value) !== null;
+  });
+
+  if (preferred) {
+    return parseFlexibleNumber(preferred[1]);
+  }
+
+  return null;
+}
+
+function isIncomeAmountKey(name) {
+  const hasIncomeWord = ['REND', 'PROVENT', 'DISTRIB', 'DIVID', 'AMORT'].some((token) => name.includes(token));
+  const hasAmountWord = ['VALOR', 'VL', 'COTA', 'QUOTA', 'UNIDADE'].some((token) => name.includes(token));
+  return hasIncomeWord && hasAmountWord;
+}
+
+function findRowIncomeType(row) {
+  const text = Object.entries(row ?? {}).map(([key, value]) => `${key} ${value}`).join(' ').toLowerCase();
+  return text.includes('amortiza') ? 'amortization' : 'dividend';
+}
+
+function findRowDate(row, tokens) {
+  const entry = Object.entries(row ?? {}).find(([key, value]) => {
+    const name = normalizeKey(key);
+    return tokens.some((token) => name.includes(normalizeKey(token))) && parseAnyDate(value);
+  });
+  return entry ? parseAnyDate(entry[1]) : null;
 }
 
 function mapDocumentTypeToEventType(documentType) {
@@ -264,9 +344,36 @@ function parseBrazilianNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function parseFlexibleNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw;
+  const number = Number(normalized);
+  return Number.isFinite(number) && number > 0 && number < 1_000 ? number : null;
+}
+
+function parseAnyDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const br = parseBrazilianDate(raw);
+  if (br) return br;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+}
+
 function parseBrazilianDate(value) {
   const match = value?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+function normalizeKey(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]+/gi, '_')
+    .toUpperCase();
 }
 
 function normalizeText(value) {
