@@ -18,7 +18,8 @@ export class FnetFiiProvider {
       const officialUrl = `${this.baseUrl}/exibirDocumento?cvm=true&id=${encodeURIComponent(item.id)}`;
       try {
         const pdf = await this.fetchBufferFn(officialUrl, { timeoutMs: this.timeoutMs, headers: { Accept: "application/pdf,*/*;q=0.8" } });
-        const content = await this.pdfTextExtractor.extract(pdf);
+        const invalidPdfContent = createInvalidPdfContent(pdf);
+        const content = invalidPdfContent ?? await this.pdfTextExtractor.extract(pdf);
         documents.push({
           symbol,
           assetType: "fii",
@@ -31,7 +32,7 @@ export class FnetFiiProvider {
           sourceUrl: officialUrl,
           downloadUrl: officialUrl,
           mimeType: "application/pdf",
-          contentHash: createHash("sha256").update(pdf).digest("hex"),
+          contentHash: invalidPdfContent ? null : createHash("sha256").update(pdf).digest("hex"),
           metadata: {
             official: true,
             category: item.category,
@@ -42,7 +43,7 @@ export class FnetFiiProvider {
           },
           processingStatus: content.extractionStatus === "failed" ? "failed" : content.extractionStatus,
           processingError: content.extractionError ?? null,
-          content
+          content: invalidPdfContent ? undefined : content
         });
       } catch (error) {
         failures.push({ sourceUrl: officialUrl, message: error.message });
@@ -61,4 +62,42 @@ export function mapDocumentType(value = "") {
   if (normalized.includes("subscr") || normalized.includes("emiss")) return "subscription_issuance";
   if (normalized.includes("assembleia")) return "shareholder_meeting";
   return "other_official_document";
+}
+
+function createInvalidPdfContent(buffer) {
+  if (Buffer.isBuffer(buffer) && buffer.subarray(0, 4).toString("utf8") === "%PDF") {
+    return null;
+  }
+
+  const title = extractTitle(buffer);
+  return {
+    rawText: null,
+    extractionStatus: "failed",
+    extractionError: title
+      ? `Downloaded document is not a valid PDF. Source returned HTML: ${title}`
+      : "Downloaded document is not a valid PDF",
+    extractedAt: null
+  };
+}
+
+function extractTitle(buffer) {
+  const content = buffer.toString("utf8", 0, Math.min(buffer.length, 4000));
+  const normalized = content.toLowerCase();
+  const opening = normalized.indexOf("<title>");
+  const closing = normalized.indexOf("</title>");
+  if (opening === -1 || closing === -1 || closing <= opening) {
+    return null;
+  }
+
+  return normalizeHtmlText(content.slice(opening + 7, closing));
+}
+
+function normalizeHtmlText(value) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }

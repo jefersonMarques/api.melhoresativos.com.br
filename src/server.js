@@ -97,8 +97,8 @@ const quotesService = new QuotesService({
   logosService,
   config
 });
-const eventsService = new EventsService({ repository });
 const incomeService = new IncomeService({ repository });
+const eventsService = new EventsService({ repository, incomeService });
 const valuationService = new ValuationService({
   quotesService,
   incomeService,

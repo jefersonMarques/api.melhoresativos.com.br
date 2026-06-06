@@ -32,7 +32,7 @@ test("downloads evidence only from official FundosNet URL and persists extracted
     },
     fetchBufferFn: async (url) => {
       assert.equal(url, "https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?cvm=true&id=1198849");
-      return Buffer.from("official-pdf-content");
+      return Buffer.from("%PDF official-pdf-content");
     },
     pdfTextExtractor: { extract: async () => ({ rawText: "CACR11 Relatório Gerencial Abril 2026", extractionStatus: "extracted", extractedAt: "2026-05-29T12:00:00.000Z" }) }
   });
@@ -41,6 +41,26 @@ test("downloads evidence only from official FundosNet URL and persists extracted
   assert.equal(result.documents[0].documentType, "fii_management_report");
   assert.match(result.documents[0].content.rawText, /CACR11/);
   assert.equal(result.documents[0].metadata.discoveryOnly, true);
+});
+
+test("does not persist text content when official FundosNet response is not a PDF", async () => {
+  const provider = new FnetFiiProvider({
+    baseUrl: "https://fnet.bmfbovespa.com.br/fnet/publico",
+    timeoutMs: 100,
+    discoveryProvider: {
+      discover: async () => ({
+        documents: [{ id: "1198836", title: "Relatório Gerencial", type: "Relatório Gerencial", category: "Relatórios", referenceDate: "2026-04-30", publishedAt: "2026-05-18T20:59:00-03:00", discoveryUrl: "https://brfiis.com.br/fundos/CACR11/documentos/x-1198836" }],
+        failures: []
+      })
+    },
+    fetchBufferFn: async () => Buffer.from("not-a-pdf-response"),
+    pdfTextExtractor: { extract: async () => { throw new Error("should not parse invalid pdf"); } }
+  });
+  const result = await provider.fetchDocuments("CACR11");
+  assert.equal(result.documents[0].processingStatus, "failed");
+  assert.match(result.documents[0].processingError, /not a valid PDF/);
+  assert.equal(result.documents[0].content, undefined);
+  assert.equal(result.documents[0].contentHash, null);
 });
 
 test("maps material FundosNet document categories to normalized types", () => {

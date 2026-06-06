@@ -116,6 +116,7 @@ Accept: application/json
 @fiiSymbol = CACR11
 @fiiSecondarySymbol = IRDM11
 @documentId = 1
+@fnetDocumentId = 1198836
 
 ### Indicadores complementares obtidos do Fundamentus
 GET {{baseUrl}}/api/fundamentals/{{fiiSymbol}}
@@ -161,6 +162,40 @@ Accept: application/json
 ### Listar fatos relevantes oficiais
 GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=material_fact
 Accept: application/json
+
+### ------------------------------------------------------------
+### Diagnóstico manual de PDF FundosNet/B3
+### ------------------------------------------------------------
+### Uso:
+### 1. Execute a sincronização de documentos acima.
+### 2. Liste os PDFs do FundosNet/B3 e verifique processingStatus, processingError e extractionStatus.
+### 3. Abra um documento específico usando o id interno retornado pela API.
+### 4. Se processingError indicar "PDF extractor not available: pdftotext", instale/configure Poppler.
+### 5. Se o link oficial retornar HTML ou página "Sistema indisponível", a falha é temporária da fonte externa.
+
+### Sincronizar apenas o FII usado no diagnóstico de PDF
+POST {{baseUrl}}/api/documents/sync
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}"]
+}
+
+### Verificar status dos PDFs oficiais do FundosNet/B3
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3
+Accept: application/json
+
+### Abrir conteúdo e metadados de um documento específico
+### Substitua @documentId pelo id interno retornado na listagem acima.
+GET {{baseUrl}}/api/documents/{{fiiSymbol}}/{{documentId}}
+Accept: application/json
+
+### Testar URL oficial do PDF no FundosNet/B3 pelo REST Client
+### O retorno esperado para PDF válido deve ter Content-Type application/pdf e corpo iniciando com %PDF.
+### Se retornar text/html ou página "Sistema indisponível", aguarde a fonte externa voltar.
+GET https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?cvm=true&id={{fnetDocumentId}}
+Accept: application/pdf,text/html;q=0.9,*/*;q=0.8
 
 ### ------------------------------------------------------------
 ### Logos — SVG persistido no PostgreSQL

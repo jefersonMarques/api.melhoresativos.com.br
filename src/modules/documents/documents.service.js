@@ -82,7 +82,9 @@ export class DocumentsService {
     for (const result of providerResults) {
       for (const document of result.documents) {
         const saved = await this.repository.upsertDocument(document);
-        if (document.content) await this.repository.setDocumentContent(saved.id, document.content);
+        if (hasExtractedText(document.content)) {
+          await this.repository.setDocumentContent(saved.id, document.content);
+        }
         saved.wasInserted ? inserted += 1 : updated += 1;
       }
       const lastDocument = result.documents.map((document) => document.referenceDate).filter(Boolean).sort().at(-1) ?? null;
@@ -104,6 +106,10 @@ export class DocumentsService {
       errors
     };
   }
+}
+
+function hasExtractedText(content) {
+  return Boolean(content?.rawText && content.extractionStatus === "extracted");
 }
 
 function errorMessage(error) {

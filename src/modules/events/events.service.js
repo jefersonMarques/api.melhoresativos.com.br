@@ -1,20 +1,30 @@
 export class EventsService {
-  constructor({ repository }) {
+  constructor({ repository, incomeService = null }) {
     this.repository = repository;
+    this.incomeService = incomeService;
   }
 
   async syncFromDocuments(symbols) {
-    const documents = await this.repository.listRecentDocuments(symbols, { limit: 500 });
+    const summaries = await this.repository.listRecentDocuments(symbols, { limit: 500 });
+    const documents = await Promise.all(summaries.map((document) => this.#loadDocumentDetail(document)));
     const events = documents.map((document) => mapDocumentToEvent(document)).filter(Boolean);
+    const incomeEntries = documents.flatMap((document) => extractIncomeFromDocument(document));
 
     for (const event of events) {
       await this.upsertEvent(event);
     }
 
+    if (this.incomeService) {
+      for (const income of incomeEntries) {
+        await this.incomeService.upsertIncome(income);
+      }
+    }
+
     return {
       symbols,
-      discovered: documents.length,
-      insertedOrUpdated: events.length
+      discovered: summaries.length,
+      insertedOrUpdated: events.length,
+      incomeInsertedOrUpdated: this.incomeService ? incomeEntries.length : 0
     };
   }
 
@@ -83,6 +93,14 @@ export class EventsService {
 
     return toEvent(result.rows[0]);
   }
+
+  async #loadDocumentDetail(document) {
+    if (!this.repository.getDocument) {
+      return document;
+    }
+
+    return await this.repository.getDocument(document.symbol, document.id) ?? document;
+  }
 }
 
 function mapDocumentToEvent(document) {
@@ -91,6 +109,7 @@ function mapDocumentToEvent(document) {
     return null;
   }
 
+  const rawText = getDocumentRawText(document);
   return {
     symbol: document.symbol,
     eventType,
@@ -101,16 +120,128 @@ function mapDocumentToEvent(document) {
     source: document.source,
     sourceDocumentId: document.sourceDocumentId,
     sourceUrl: document.sourceUrl,
-    summary: null,
-    rawText: null,
+    summary: createEventSummary(document, rawText),
+    rawText: rawText ? truncateText(rawText, 20_000) : null,
     importance: inferImportance(eventType),
     sentiment: 'neutral',
     metadata: {
       sourceDocumentType: document.documentType,
       generatedFromDocument: true,
-      documentId: document.id
+      documentId: document.id,
+      hasExtractedContent: Boolean(rawText)
     }
   };
+}
+
+function extractIncomeFromDocument(document) {
+  const rawText = getDocumentRawText(document);
+
+  if (document.source === 'cvm_open_data') {
+    return extractIncomeFromStructuredReport(document, rawText);
+  }
+
+  if (document.documentType !== 'income_announcement') {
+    return [];
+  }
+
+  const amount = findIncomeAmount(rawText);
+  if (!amount) {
+    return [];
+  }
+
+  return [createIncomeEntry({
+    document,
+    amount,
+    incomeType: inferIncomeType(document, rawText),
+    comDate: findDateByLabels(rawText, ['data com', 'com direito', 'posição', 'posicao', 'cotistas em']),
+    exDate: findDateByLabels(rawText, ['data ex', 'ex-rendimento', 'ex rendimento', 'ex-dividendo', 'ex dividendo', 'a partir de']),
+    paymentDate: findDateByLabels(rawText, ['pagamento', 'data do pagamento', 'data de pagamento']),
+    extractionMethod: 'document_text_pattern'
+  })];
+}
+
+function extractIncomeFromStructuredReport(document, rawText) {
+  const rows = parseStructuredRows(rawText);
+  return rows.map((row, index) => {
+    const amount = findRowIncomeAmount(row);
+    if (!amount) return null;
+
+    return createIncomeEntry({
+      document,
+      amount,
+      incomeType: findRowIncomeType(row),
+      comDate: findRowDate(row, ['COM', 'DATA_BASE', 'POSICAO', 'POSIÇÃO', 'COTISTA']),
+      exDate: findRowDate(row, ['EX']),
+      paymentDate: findRowDate(row, ['PAGAMENTO', 'PAGTO', 'PAG']),
+      referenceDate: findRowDate(row, ['REFERENCIA', 'REFERÊNCIA', 'COMPETENCIA', 'COMPETÊNCIA']) ?? document.referenceDate,
+      rowIndex: index,
+      extractionMethod: 'cvm_structured_report'
+    });
+  }).filter(Boolean);
+}
+
+function createIncomeEntry({ document, amount, incomeType, comDate, exDate, paymentDate, referenceDate, rowIndex = null, extractionMethod }) {
+  return {
+    symbol: document.symbol,
+    incomeType,
+    amount,
+    comDate: comDate ?? null,
+    exDate: exDate ?? null,
+    paymentDate: paymentDate ?? null,
+    referenceDate: referenceDate ?? document.referenceDate,
+    declaredAt: document.publishedAt,
+    source: document.source,
+    sourceDocumentId: rowIndex === null ? document.sourceDocumentId : `${document.sourceDocumentId}:row:${rowIndex}`,
+    sourceUrl: document.sourceUrl,
+    metadata: {
+      sourceDocumentType: document.documentType,
+      documentId: document.id,
+      extractionMethod
+    }
+  };
+}
+
+function parseStructuredRows(rawText) {
+  if (!rawText) return [];
+  try {
+    const parsed = JSON.parse(rawText);
+    return Array.isArray(parsed?.rows) ? parsed.rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function findRowIncomeAmount(row) {
+  const entries = Object.entries(row ?? {});
+  const preferred = entries.find(([key, value]) => {
+    const name = normalizeKey(key);
+    return isIncomeAmountKey(name) && parseFlexibleNumber(value) !== null;
+  });
+
+  if (preferred) {
+    return parseFlexibleNumber(preferred[1]);
+  }
+
+  return null;
+}
+
+function isIncomeAmountKey(name) {
+  const hasIncomeWord = ['REND', 'PROVENT', 'DISTRIB', 'DIVID', 'AMORT'].some((token) => name.includes(token));
+  const hasAmountWord = ['VALOR', 'VL', 'COTA', 'QUOTA', 'UNIDADE'].some((token) => name.includes(token));
+  return hasIncomeWord && hasAmountWord;
+}
+
+function findRowIncomeType(row) {
+  const text = Object.entries(row ?? {}).map(([key, value]) => `${key} ${value}`).join(' ').toLowerCase();
+  return text.includes('amortiza') ? 'amortization' : 'dividend';
+}
+
+function findRowDate(row, tokens) {
+  const entry = Object.entries(row ?? {}).find(([key, value]) => {
+    const name = normalizeKey(key);
+    return tokens.some((token) => name.includes(normalizeKey(token))) && parseAnyDate(value);
+  });
+  return entry ? parseAnyDate(entry[1]) : null;
 }
 
 function mapDocumentTypeToEventType(documentType) {
@@ -142,6 +273,128 @@ function createEventDedupKey(event) {
     event.sourceDocumentId ?? event.title,
     event.referenceDate ?? event.eventDate ?? event.publishedAt ?? ''
   ].join(':');
+}
+
+function createEventSummary(document, rawText) {
+  if (!rawText) {
+    return `${document.title} sincronizado a partir de ${document.source}.`;
+  }
+
+  const text = normalizeText(rawText);
+  if (document.documentType === 'income_announcement') {
+    const amount = findIncomeAmount(text);
+    const paymentDate = findDateByLabels(text, ['pagamento', 'data do pagamento', 'data de pagamento']);
+    const parts = [document.title];
+    if (amount) parts.push(`valor por cota R$ ${formatDecimal(amount)}`);
+    if (paymentDate) parts.push(`pagamento em ${paymentDate}`);
+    return parts.join(' — ');
+  }
+
+  return truncateText(firstUsefulLines(text).join(' '), 600) || `${document.title} sincronizado a partir de ${document.source}.`;
+}
+
+function getDocumentRawText(document) {
+  return document.content?.rawText ?? document.rawText ?? null;
+}
+
+function firstUsefulLines(text) {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 20 && !line.startsWith('{') && !line.startsWith('['))
+    .slice(0, 3);
+}
+
+function findIncomeAmount(text) {
+  if (!text) return null;
+  const patterns = [
+    /R\$\s*([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})\s*(?:por\s+cota|por\s+quota|\/\s*cota)/i,
+    /(?:valor\s+(?:do\s+)?(?:rendimento|provento|amortizacao|amortização))[^\n]{0,100}?R\$\s*([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})/i,
+    /(?:rendimento|provento|amortizacao|amortização)[^\n]{0,100}?([0-9]+,[0-9]{4,8})/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match ? parseBrazilianNumber(match[1]) : null;
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function findDateByLabels(text, labels) {
+  if (!text) return null;
+  for (const label of labels) {
+    const pattern = new RegExp(`${escapeRegex(label)}[\\s\\S]{0,140}?(\\d{2}\\/\\d{2}\\/\\d{4})`, 'i');
+    const match = text.match(pattern);
+    if (match) return parseBrazilianDate(match[1]);
+  }
+  return null;
+}
+
+function inferIncomeType(document, text) {
+  const value = `${document.title} ${text ?? ''}`.toLowerCase();
+  return value.includes('amortiza') ? 'amortization' : 'dividend';
+}
+
+function parseBrazilianNumber(value) {
+  if (!value) return null;
+  const normalized = value.replace(/\./g, '').replace(',', '.');
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseFlexibleNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw;
+  const number = Number(normalized);
+  return Number.isFinite(number) && number > 0 && number < 1_000 ? number : null;
+}
+
+function parseAnyDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const br = parseBrazilianDate(raw);
+  if (br) return br;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+}
+
+function parseBrazilianDate(value) {
+  const match = value?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+function normalizeKey(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]+/gi, '_')
+    .toUpperCase();
+}
+
+function normalizeText(value) {
+  return String(value ?? '')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function truncateText(value, maximumLength) {
+  const text = String(value ?? '').trim();
+  return text.length > maximumLength ? `${text.slice(0, maximumLength - 1)}…` : text;
+}
+
+function formatDecimal(value) {
+  return Number(value).toFixed(8).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function toEvent(row) {
