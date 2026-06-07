@@ -153,9 +153,10 @@ function extractIncomeFromDocument(document) {
     document,
     amount,
     incomeType: inferIncomeType(document, rawText),
-    comDate: findDateByLabels(rawText, ['data com', 'com direito', 'posição', 'posicao', 'cotistas em']),
+    comDate: findDateByLabels(rawText, ['data-base', 'data base', 'data com', 'com direito', 'posição', 'posicao', 'cotistas em']),
     exDate: findDateByLabels(rawText, ['data ex', 'ex-rendimento', 'ex rendimento', 'ex-dividendo', 'ex dividendo', 'a partir de']),
     paymentDate: findDateByLabels(rawText, ['pagamento', 'data do pagamento', 'data de pagamento']),
+    referenceDate: findReferencePeriod(rawText) ?? document.referenceDate,
     extractionMethod: 'document_text_pattern'
   })];
 }
@@ -309,8 +310,8 @@ function findIncomeAmount(text) {
   if (!text) return null;
   const patterns = [
     /R\$\s*([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})\s*(?:por\s+cota|por\s+quota|\/\s*cota)/i,
-    /(?:valor\s+(?:do\s+)?(?:rendimento|provento|amortizacao|amortização))[^\n]{0,100}?R\$\s*([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})/i,
-    /(?:rendimento|provento|amortizacao|amortização)[^\n]{0,100}?([0-9]+,[0-9]{4,8})/i
+    /(?:valor\s+(?:do\s+)?(?:rendimento|provento|amortizacao|amortização))[\s\S]{0,180}?(?:R\$\s*)?([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})/i,
+    /(?:rendimento|provento|amortizacao|amortização)[\s\S]{0,180}?([0-9]+,[0-9]{2,8})/i
   ];
 
   for (const pattern of patterns) {
@@ -325,16 +326,28 @@ function findIncomeAmount(text) {
 function findDateByLabels(text, labels) {
   if (!text) return null;
   for (const label of labels) {
-    const pattern = new RegExp(`${escapeRegex(label)}[\\s\\S]{0,140}?(\\d{2}\\/\\d{2}\\/\\d{4})`, 'i');
+    const pattern = new RegExp(`${escapeRegex(label)}[\\s\\S]{0,180}?(\\d{2}\\/\\d{2}\\/\\d{4})`, 'i');
     const match = text.match(pattern);
     if (match) return parseBrazilianDate(match[1]);
   }
   return null;
 }
 
+function findReferencePeriod(text) {
+  if (!text) return null;
+  const match = text.match(/período\s+de\s+referência[\s\S]{0,80}?([a-zç]+)\/(\d{4})/i)
+    ?? text.match(/periodo\s+de\s+referencia[\s\S]{0,80}?([a-zç]+)\/(\d{4})/i);
+  if (!match) return null;
+  const month = monthNumber(match[1]);
+  return month ? `${match[2]}-${month}-01` : null;
+}
+
 function inferIncomeType(document, text) {
-  const value = `${document.title} ${text ?? ''}`.toLowerCase();
-  return value.includes('amortiza') ? 'amortization' : 'dividend';
+  const content = String(text ?? '').toLowerCase();
+  if (/valor\s+do\s+rendimento[\s\S]{0,120}?(?:r\$\s*)?[0-9]+,[0-9]{2,8}/i.test(content)) return 'dividend';
+  if (/valor\s+(?:da\s+)?amortiza[\s\S]{0,120}?(?:r\$\s*)?[0-9]+,[0-9]{2,8}/i.test(content)) return 'amortization';
+  const value = `${document.title} ${content}`.toLowerCase();
+  return value.includes('amortiza') && !value.includes('rendimento') ? 'amortization' : 'dividend';
 }
 
 function parseBrazilianNumber(value) {
@@ -366,6 +379,14 @@ function parseAnyDate(value) {
 function parseBrazilianDate(value) {
   const match = value?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+function monthNumber(value) {
+  const months = {
+    janeiro: '01', fevereiro: '02', marco: '03', março: '03', abril: '04', maio: '05', junho: '06',
+    julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12'
+  };
+  return months[String(value ?? '').toLowerCase()] ?? null;
 }
 
 function normalizeKey(value) {
