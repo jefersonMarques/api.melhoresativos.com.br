@@ -58,10 +58,12 @@ export class EventsService {
          sentiment, dedup_key, metadata
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
        ON CONFLICT (symbol, dedup_key) DO UPDATE SET
+         event_type = EXCLUDED.event_type,
          title = EXCLUDED.title,
          event_date = EXCLUDED.event_date,
          published_at = EXCLUDED.published_at,
          reference_date = EXCLUDED.reference_date,
+         source_document_id = EXCLUDED.source_document_id,
          source_url = EXCLUDED.source_url,
          summary = EXCLUDED.summary,
          raw_text = EXCLUDED.raw_text,
@@ -268,10 +270,14 @@ function inferImportance(eventType) {
 }
 
 function createEventDedupKey(event) {
+  if (event.source && event.sourceDocumentId) {
+    return [event.source, event.sourceDocumentId].join(':');
+  }
+
   return [
     event.eventType,
-    event.source,
-    event.sourceDocumentId ?? event.title,
+    event.source ?? '',
+    event.title,
     event.referenceDate ?? event.eventDate ?? event.publishedAt ?? ''
   ].join(':');
 }
@@ -335,8 +341,8 @@ function findDateByLabels(text, labels) {
 
 function findReferencePeriod(text) {
   if (!text) return null;
-  const match = text.match(/período\s+de\s+referência[\s\S]{0,80}?([a-zç]+)\/(\d{4})/i)
-    ?? text.match(/periodo\s+de\s+referencia[\s\S]{0,80}?([a-zç]+)\/(\d{4})/i);
+  const normalized = normalizeText(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const match = normalized.match(/periodo\s+de\s+referencia[\s\S]{0,120}?([a-zç]+)\/(\d{4})/i);
   if (!match) return null;
   const month = monthNumber(match[1]);
   return month ? `${match[2]}-${month}-01` : null;
