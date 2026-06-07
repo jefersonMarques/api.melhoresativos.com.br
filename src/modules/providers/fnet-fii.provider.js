@@ -22,8 +22,9 @@ export class FnetFiiProvider {
         const invalidPdfContent = htmlContent ? null : createInvalidPdfContent(buffer);
         const content = htmlContent ?? invalidPdfContent ?? await this.pdfTextExtractor.extract(buffer);
         const contentTitle = htmlContent?.metadata?.htmlTitle;
-        const title = isUsefulTitle(item.title, symbol) ? item.title : contentTitle ?? item.title;
-        const typeValue = [contentTitle, item.type, title].filter(Boolean).join(" ");
+        const extractedText = content?.rawText ?? "";
+        const title = inferDocumentTitle({ item, symbol, contentTitle, extractedText });
+        const typeValue = [contentTitle, item.type, title, extractedText.slice(0, 1500)].filter(Boolean).join(" ");
         documents.push({
           symbol,
           assetType: "fii",
@@ -59,7 +60,7 @@ export class FnetFiiProvider {
 }
 
 export function mapDocumentType(value = "") {
-  const normalized = value.toLowerCase();
+  const normalized = decodeHtmlEntities(value).toLowerCase();
   if (normalized.includes("pagamento de proventos") || normalized.includes("rendimento") || normalized.includes("amortiza")) return "income_announcement";
   if (normalized.includes("relatório gerencial") || normalized.includes("relatorio gerencial")) return "fii_management_report";
   if (normalized.includes("fato relevante")) return "material_fact";
@@ -113,6 +114,17 @@ function createInvalidPdfContent(buffer) {
   };
 }
 
+function inferDocumentTitle({ item, symbol, contentTitle, extractedText }) {
+  if (isUsefulTitle(item.title, symbol)) return decodeHtmlEntities(item.title);
+  if (contentTitle) return decodeHtmlEntities(contentTitle);
+  const text = decodeHtmlEntities(extractedText).slice(0, 1500).toLowerCase();
+  if (text.includes("relatório gerencial") || text.includes("relatorio gerencial")) return "Relatório Gerencial";
+  if (text.includes("pagamento de proventos")) return "Informações sobre Pagamento de Proventos";
+  if (text.includes("fato relevante")) return "Fato Relevante";
+  if (text.includes("comunicado ao mercado")) return "Comunicado ao Mercado";
+  return item.title;
+}
+
 function isUsefulTitle(title, symbol) {
   const value = String(title ?? "").trim().toLowerCase();
   return value && value !== `documento oficial ${String(symbol).toLowerCase()}`;
@@ -153,11 +165,7 @@ function stripHtml(html) {
 }
 
 function normalizeHtmlText(value) {
-  return String(value ?? "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+  return decodeHtmlEntities(String(value ?? ""))
     .replace(/\r/g, "")
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n+/g, "\n")
@@ -169,4 +177,25 @@ function normalizeFundosNetIncomeText(value) {
     .replace(/Data-base[\s\S]{0,120}?(\d{2}\/\d{2}\/\d{4})/i, "Data com $1")
     .replace(/Valor do provento[\s\S]{0,120}?([0-9]+,[0-9]{2,8})/i, "Valor do rendimento R$ $1 por cota")
     .replace(/Data do pagamento[\s\S]{0,120}?(\d{2}\/\d{2}\/\d{4})/i, "Data do pagamento $1");
+}
+
+function decodeHtmlEntities(value) {
+  return String(value ?? "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&ccedil;/gi, "ç")
+    .replace(/&atilde;/gi, "ã")
+    .replace(/&otilde;/gi, "õ")
+    .replace(/&aacute;/gi, "á")
+    .replace(/&eacute;/gi, "é")
+    .replace(/&iacute;/gi, "í")
+    .replace(/&oacute;/gi, "ó")
+    .replace(/&uacute;/gi, "ú")
+    .replace(/&Aacute;/g, "Á")
+    .replace(/&Eacute;/g, "É")
+    .replace(/&Iacute;/g, "Í")
+    .replace(/&Oacute;/g, "Ó")
+    .replace(/&Uacute;/g, "Ú");
 }
