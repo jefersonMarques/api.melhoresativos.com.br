@@ -16,7 +16,12 @@ export class PdfTextExtractor {
 
   async extract(buffer) {
     if (!this.enabled) {
-      return { rawText: null, extractionStatus: "unsupported", extractionError: "PDF text extraction is disabled" };
+      return {
+        rawText: null,
+        extractionStatus: "unsupported",
+        extractionReason: "pdf_text_extraction_disabled",
+        extractionError: "PDF text extraction is disabled"
+      };
     }
 
     const directory = await mkdtemp(join(tmpdir(), "market-data-pdf-"));
@@ -30,14 +35,26 @@ export class PdfTextExtractor {
       });
       const rawText = stdout.trim();
       if (!rawText) {
-        return { rawText: null, extractionStatus: "unsupported", extractionError: "PDF does not contain extractable text" };
+        return {
+          rawText: null,
+          extractionStatus: "unsupported",
+          extractionReason: "pdf_without_extractable_text",
+          extractionError: "PDF does not contain extractable text"
+        };
       }
-      return { rawText, extractionStatus: "extracted", extractionError: null, extractedAt: new Date().toISOString() };
+      return {
+        rawText,
+        extractionStatus: "extracted",
+        extractionReason: "pdf_text_extracted",
+        extractionError: null,
+        extractedAt: new Date().toISOString()
+      };
     } catch (error) {
       const missingBinary = error?.code === "ENOENT";
       return {
         rawText: null,
         extractionStatus: missingBinary ? "unsupported" : "failed",
+        extractionReason: missingBinary ? "pdf_extractor_binary_missing" : "pdf_extractor_failed",
         extractionError: missingBinary ? `PDF extractor not available: ${this.binary}` : String(error.message ?? error)
       };
     } finally {
