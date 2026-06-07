@@ -1,0 +1,63 @@
+### Asset Diagnostics — Market Data API
+### Extensão VS Code: humao.rest-client
+
+@baseUrl = http://localhost:3333
+@fiiSymbol = CACR11
+@stockSymbol = PETR4
+@secondaryFiiSymbol = MXRF11
+
+### Health check
+GET {{baseUrl}}/health
+Accept: application/json
+
+### Diagnóstico completo de um FII
+GET {{baseUrl}}/api/diagnostics/assets?symbols={{fiiSymbol}}
+Accept: application/json
+
+### Diagnóstico completo de múltiplos ativos
+GET {{baseUrl}}/api/diagnostics/assets?symbols={{fiiSymbol}},{{secondaryFiiSymbol}},{{stockSymbol}}
+Accept: application/json
+
+### Diagnóstico via POST
+POST {{baseUrl}}/api/diagnostics/assets
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}", "{{secondaryFiiSymbol}}", "{{stockSymbol}}"]
+}
+
+### Pré-condição recomendada para FIIs — sincronizar documentos
+POST {{baseUrl}}/api/documents/sync
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}", "{{secondaryFiiSymbol}}"]
+}
+
+### Pré-condição recomendada para FIIs — sincronizar eventos/proventos
+POST {{baseUrl}}/api/events/sync
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}", "{{secondaryFiiSymbol}}"]
+}
+
+### Pré-condição recomendada — sincronizar logos
+POST {{baseUrl}}/api/logos/sync
+Content-Type: application/json
+Accept: application/json
+
+{
+  "symbols": ["{{fiiSymbol}}", "{{secondaryFiiSymbol}}", "{{stockSymbol}}"]
+}
+
+### Conferir proventos de referência
+GET {{baseUrl}}/api/income/{{fiiSymbol}}?years=5&limit=120
+Accept: application/json
+
+### Conferir contexto de IA factual
+GET {{baseUrl}}/api/assets/{{fiiSymbol}}/ai-context
+Accept: application/json
