@@ -341,11 +341,25 @@ function findDateByLabels(text, labels) {
 
 function findReferencePeriod(text) {
   if (!text) return null;
-  const normalized = normalizeText(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const match = normalized.match(/periodo\s+de\s+referencia[\s\S]{0,120}?([a-zç]+)\/(\d{4})/i);
-  if (!match) return null;
-  const month = monthNumber(match[1]);
-  return month ? `${match[2]}-${month}-01` : null;
+  const normalized = normalizeText(text)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  const patterns = [
+    /periodo\s+de\s+referencia[\s\S]{0,140}?([a-z]+)\s*\/\s*(\d{4})/i,
+    /periodo\s+de\s+referencia[\s\S]{0,140}?([a-z]+)\s+de\s+(\d{4})/i,
+    /competencia[\s\S]{0,140}?([a-z]+)\s*\/\s*(\d{4})/i,
+    /referencia[\s\S]{0,140}?([a-z]+)\s*\/\s*(\d{4})/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+    const month = monthNumber(match[1]);
+    if (month) return `${match[2]}-${month}-01`;
+  }
+
+  return null;
 }
 
 function inferIncomeType(document, text) {
