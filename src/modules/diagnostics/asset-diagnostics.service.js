@@ -50,7 +50,7 @@ export class AssetDiagnosticsService {
     return {
       symbol: normalizedSymbol,
       assetType,
-      status: resolveAssetStatus(checks),
+      status: resolveAssetStatus(checks, assetType),
       score: calculateScore(checks, assetType),
       checks
     };
@@ -208,20 +208,32 @@ function applyAssetTypePolicy(assetType, checks) {
     events: optional(checks.events, 'Eventos oficiais normalizados ainda são opcionais para ações.'),
     income: optional(checks.income, 'Proventos normalizados ainda são opcionais para ações.'),
     dataQuality: checks.dataQuality.status === 'warning'
-      ? { ...checks.dataQuality, message: 'Score de qualidade parcial esperado para ações sem camada documental completa.' }
+      ? {
+          ...checks.dataQuality,
+          message: 'Score de qualidade parcial esperado para ações sem camada documental completa.',
+          nonBlocking: true
+        }
       : checks.dataQuality
   };
 }
 
-function resolveAssetStatus(checks) {
-  const requiredStatuses = Object.values(checks)
-    .filter((check) => check.applicability !== 'optional')
-    .map((check) => check.status);
+function resolveAssetStatus(checks, assetType) {
+  const requiredChecks = Object.values(checks).filter((check) => check.applicability !== 'optional');
+  const requiredStatuses = requiredChecks.map((check) => check.status);
 
   if (requiredStatuses.includes('error')) return 'error';
   if (requiredStatuses.includes('missing')) return 'warning';
+
+  if (assetType === 'stock' && hasOnlyNonBlockingWarnings(requiredChecks)) {
+    return 'ok';
+  }
+
   if (requiredStatuses.includes('warning')) return 'warning';
   return 'ok';
+}
+
+function hasOnlyNonBlockingWarnings(checks) {
+  return checks.every((check) => check.status === 'ok' || (check.status === 'warning' && check.nonBlocking === true));
 }
 
 function calculateScore(checks, assetType) {
