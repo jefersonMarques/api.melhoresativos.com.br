@@ -76,7 +76,7 @@ function createOfficialHtmlContent(buffer) {
   if (!looksLikeHtml(text)) return null;
 
   const title = extractTitleFromText(text);
-  const normalizedTitle = title.toLowerCase();
+  const normalizedTitle = String(title ?? "").toLowerCase();
   const maintenanceTitles = ["sistema indisponível", "sistema indisponivel", "erro", "error"];
   if (maintenanceTitles.some((value) => normalizedTitle.includes(value))) {
     return null;
@@ -150,7 +150,7 @@ function looksLikeHtml(value) {
 }
 
 function isOfficialFnetHtml(rawText, title) {
-  const text = `${title}\n${rawText}`.toLowerCase();
+  const text = `${title ?? ""}\n${rawText}`.toLowerCase();
   return text.includes("informações sobre pagamento de proventos")
     || text.includes("informacoes sobre pagamento de proventos")
     || text.includes("nome do fundo")
