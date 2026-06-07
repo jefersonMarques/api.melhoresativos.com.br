@@ -45,7 +45,8 @@ export class FnetFiiProvider {
             discoveryProvider: "brfiis_public_index",
             discoveryUrl: item.discoveryUrl,
             discoveryOnly: true,
-            ...(htmlContent?.metadata ?? {})
+            ...(htmlContent?.metadata ?? {}),
+            ...(content?.extractionReason ? { extractionReason: content.extractionReason } : {})
           },
           processingStatus: content.extractionStatus === "failed" ? "failed" : content.extractionStatus,
           processingError: content.extractionError ?? null,
@@ -89,6 +90,7 @@ function createOfficialHtmlContent(buffer) {
   return {
     rawText,
     extractionStatus: "extracted",
+    extractionReason: "official_fundosnet_html_extracted",
     extractionError: null,
     extractedAt: new Date().toISOString(),
     metadata: {
@@ -104,14 +106,27 @@ function createInvalidPdfContent(buffer) {
   }
 
   const title = extractTitle(buffer);
+  const reason = inferInvalidHtmlReason(title);
   return {
     rawText: null,
     extractionStatus: "failed",
+    extractionReason: reason,
     extractionError: title
       ? `Downloaded document is not a valid PDF. Source returned HTML: ${title}`
       : "Downloaded document is not a valid PDF",
     extractedAt: null
   };
+}
+
+function inferInvalidHtmlReason(title) {
+  const normalized = String(title ?? "").toLowerCase();
+  if (normalized.includes("sistema indisponível") || normalized.includes("sistema indisponivel")) {
+    return "fundosnet_maintenance_page";
+  }
+  if (normalized.includes("erro") || normalized.includes("error")) {
+    return "fundosnet_error_page";
+  }
+  return "non_pdf_non_official_html_response";
 }
 
 function inferDocumentTitle({ item, symbol, contentTitle, extractedText }) {
