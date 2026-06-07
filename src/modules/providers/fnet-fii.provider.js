@@ -80,7 +80,7 @@ function createOfficialHtmlContent(buffer) {
     return null;
   }
 
-  const rawText = normalizeHtmlText(stripHtml(text));
+  const rawText = normalizeFundosNetIncomeText(normalizeHtmlText(stripHtml(text)));
   if (!rawText || !isOfficialFnetHtml(rawText, title)) {
     return null;
   }
@@ -162,4 +162,11 @@ function normalizeHtmlText(value) {
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n+/g, "\n")
     .trim();
+}
+
+function normalizeFundosNetIncomeText(value) {
+  return value
+    .replace(/Data-base[\s\S]{0,120}?(\d{2}\/\d{2}\/\d{4})/i, "Data com $1")
+    .replace(/Valor do provento[\s\S]{0,120}?([0-9]+,[0-9]{2,8})/i, "Valor do rendimento R$ $1 por cota")
+    .replace(/Data do pagamento[\s\S]{0,120}?(\d{2}\/\d{2}\/\d{4})/i, "Data do pagamento $1");
 }
