@@ -17,29 +17,36 @@ export class FnetFiiProvider {
     for (const item of discovered.documents) {
       const officialUrl = `${this.baseUrl}/exibirDocumento?cvm=true&id=${encodeURIComponent(item.id)}`;
       try {
-        const pdf = await this.fetchBufferFn(officialUrl, { timeoutMs: this.timeoutMs, headers: { Accept: "application/pdf,*/*;q=0.8" } });
-        const invalidPdfContent = createInvalidPdfContent(pdf);
-        const content = invalidPdfContent ?? await this.pdfTextExtractor.extract(pdf);
+        const buffer = await this.fetchBufferFn(officialUrl, { timeoutMs: this.timeoutMs, headers: { Accept: "application/pdf,text/html,*/*;q=0.8" } });
+        const htmlContent = createOfficialHtmlContent(buffer);
+        const invalidPdfContent = htmlContent ? null : createInvalidPdfContent(buffer);
+        const content = htmlContent ?? invalidPdfContent ?? await this.pdfTextExtractor.extract(buffer);
+        const contentTitle = htmlContent?.metadata?.htmlTitle;
+        const extractedText = content?.rawText ?? "";
+        const title = inferDocumentTitle({ item, symbol, contentTitle, extractedText });
+        const typeValue = [contentTitle, item.type, title, extractedText.slice(0, 1500)].filter(Boolean).join(" ");
         documents.push({
           symbol,
           assetType: "fii",
-          documentType: mapDocumentType(item.type ?? item.title),
-          title: item.title,
+          documentType: mapDocumentType(typeValue),
+          title,
           referenceDate: item.referenceDate,
           publishedAt: item.publishedAt,
           source: "fundosnet_b3",
           sourceDocumentId: item.id,
           sourceUrl: officialUrl,
           downloadUrl: officialUrl,
-          mimeType: "application/pdf",
-          contentHash: invalidPdfContent ? null : createHash("sha256").update(pdf).digest("hex"),
+          mimeType: htmlContent ? "text/html" : "application/pdf",
+          contentHash: invalidPdfContent ? null : createHash("sha256").update(buffer).digest("hex"),
           metadata: {
             official: true,
             category: item.category,
             type: item.type,
             discoveryProvider: "brfiis_public_index",
             discoveryUrl: item.discoveryUrl,
-            discoveryOnly: true
+            discoveryOnly: true,
+            ...(htmlContent?.metadata ?? {}),
+            ...(content?.extractionReason ? { extractionReason: content.extractionReason } : {})
           },
           processingStatus: content.extractionStatus === "failed" ? "failed" : content.extractionStatus,
           processingError: content.extractionError ?? null,
@@ -54,14 +61,43 @@ export class FnetFiiProvider {
 }
 
 export function mapDocumentType(value = "") {
-  const normalized = value.toLowerCase();
+  const normalized = decodeHtmlEntities(value).toLowerCase();
+  if (normalized.includes("pagamento de proventos") || normalized.includes("rendimento") || normalized.includes("amortiza")) return "income_announcement";
   if (normalized.includes("relatório gerencial") || normalized.includes("relatorio gerencial")) return "fii_management_report";
   if (normalized.includes("fato relevante")) return "material_fact";
   if (normalized.includes("comunicado")) return "market_announcement";
-  if (normalized.includes("rendimento") || normalized.includes("amortiza")) return "income_announcement";
   if (normalized.includes("subscr") || normalized.includes("emiss")) return "subscription_issuance";
   if (normalized.includes("assembleia")) return "shareholder_meeting";
   return "other_official_document";
+}
+
+function createOfficialHtmlContent(buffer) {
+  const text = buffer.toString("utf8", 0, Math.min(buffer.length, 300_000));
+  if (!looksLikeHtml(text)) return null;
+
+  const title = extractTitleFromText(text);
+  const normalizedTitle = String(title ?? "").toLowerCase();
+  const maintenanceTitles = ["sistema indisponível", "sistema indisponivel", "erro", "error"];
+  if (maintenanceTitles.some((value) => normalizedTitle.includes(value))) {
+    return null;
+  }
+
+  const rawText = normalizeFundosNetIncomeText(normalizeHtmlText(stripHtml(text)));
+  if (!rawText || !isOfficialFnetHtml(rawText, title)) {
+    return null;
+  }
+
+  return {
+    rawText,
+    extractionStatus: "extracted",
+    extractionReason: "official_fundosnet_html_extracted",
+    extractionError: null,
+    extractedAt: new Date().toISOString(),
+    metadata: {
+      htmlTitle: title,
+      htmlDocument: true
+    }
+  };
 }
 
 function createInvalidPdfContent(buffer) {
@@ -70,9 +106,11 @@ function createInvalidPdfContent(buffer) {
   }
 
   const title = extractTitle(buffer);
+  const reason = inferInvalidHtmlReason(title);
   return {
     rawText: null,
     extractionStatus: "failed",
+    extractionReason: reason,
     extractionError: title
       ? `Downloaded document is not a valid PDF. Source returned HTML: ${title}`
       : "Downloaded document is not a valid PDF",
@@ -80,8 +118,50 @@ function createInvalidPdfContent(buffer) {
   };
 }
 
+function inferInvalidHtmlReason(title) {
+  const normalized = String(title ?? "").toLowerCase();
+  if (normalized.includes("sistema indisponível") || normalized.includes("sistema indisponivel")) {
+    return "fundosnet_maintenance_page";
+  }
+  if (normalized.includes("erro") || normalized.includes("error")) {
+    return "fundosnet_error_page";
+  }
+  return "non_pdf_non_official_html_response";
+}
+
+function inferDocumentTitle({ item, symbol, contentTitle, extractedText }) {
+  if (isUsefulTitle(item.title, symbol)) return decodeHtmlEntities(item.title);
+  if (contentTitle) return decodeHtmlEntities(contentTitle);
+  const text = decodeHtmlEntities(extractedText).slice(0, 1500).toLowerCase();
+  if (text.includes("relatório gerencial") || text.includes("relatorio gerencial")) return "Relatório Gerencial";
+  if (text.includes("pagamento de proventos")) return "Informações sobre Pagamento de Proventos";
+  if (text.includes("fato relevante")) return "Fato Relevante";
+  if (text.includes("comunicado ao mercado")) return "Comunicado ao Mercado";
+  return item.title;
+}
+
+function isUsefulTitle(title, symbol) {
+  const value = String(title ?? "").trim().toLowerCase();
+  return value && value !== `documento oficial ${String(symbol).toLowerCase()}`;
+}
+
+function looksLikeHtml(value) {
+  return value.trimStart().toLowerCase().startsWith("<html") || value.toLowerCase().includes("<body");
+}
+
+function isOfficialFnetHtml(rawText, title) {
+  const text = `${title ?? ""}\n${rawText}`.toLowerCase();
+  return text.includes("informações sobre pagamento de proventos")
+    || text.includes("informacoes sobre pagamento de proventos")
+    || text.includes("nome do fundo")
+    || text.includes("código de negociação");
+}
+
 function extractTitle(buffer) {
-  const content = buffer.toString("utf8", 0, Math.min(buffer.length, 4000));
+  return extractTitleFromText(buffer.toString("utf8", 0, Math.min(buffer.length, 4000)));
+}
+
+function extractTitleFromText(content) {
   const normalized = content.toLowerCase();
   const opening = normalized.indexOf("<title>");
   const closing = normalized.indexOf("</title>");
@@ -92,12 +172,45 @@ function extractTitle(buffer) {
   return normalizeHtmlText(content.slice(opening + 7, closing));
 }
 
+function stripHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, "\n");
+}
+
 function normalizeHtmlText(value) {
+  return decodeHtmlEntities(String(value ?? ""))
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
+    .trim();
+}
+
+function normalizeFundosNetIncomeText(value) {
   return value
+    .replace(/Data-base[\s\S]{0,120}?(\d{2}\/\d{2}\/\d{4})/i, "Data com $1")
+    .replace(/Valor do provento[\s\S]{0,120}?([0-9]+,[0-9]{2,8})/i, "Valor do rendimento R$ $1 por cota")
+    .replace(/Data do pagamento[\s\S]{0,120}?(\d{2}\/\d{2}\/\d{4})/i, "Data do pagamento $1");
+}
+
+function decodeHtmlEntities(value) {
+  return String(value ?? "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&ccedil;/gi, "ç")
+    .replace(/&atilde;/gi, "ã")
+    .replace(/&otilde;/gi, "õ")
+    .replace(/&aacute;/gi, "á")
+    .replace(/&eacute;/gi, "é")
+    .replace(/&iacute;/gi, "í")
+    .replace(/&oacute;/gi, "ó")
+    .replace(/&uacute;/gi, "ú")
+    .replace(/&Aacute;/g, "Á")
+    .replace(/&Eacute;/g, "É")
+    .replace(/&Iacute;/g, "Í")
+    .replace(/&Oacute;/g, "Ó")
+    .replace(/&Uacute;/g, "Ú");
 }

@@ -7,6 +7,7 @@ import { runMigrations } from "./database/migrate.js";
 import { AiContextService } from "./modules/ai-context/ai-context.service.js";
 import { AssetsService } from "./modules/assets/assets.service.js";
 import { DataQualityService } from "./modules/data-quality/data-quality.service.js";
+import { AssetDiagnosticsService } from "./modules/diagnostics/asset-diagnostics.service.js";
 import { DocumentsService } from "./modules/documents/documents.service.js";
 import { PdfTextExtractor } from "./modules/documents/pdf-text.extractor.js";
 import { EventsService } from "./modules/events/events.service.js";
@@ -126,6 +127,16 @@ const aiContextService = new AiContextService({
   eventsService,
   dataQualityService
 });
+const diagnosticsService = new AssetDiagnosticsService({
+  quotesService,
+  documentsService,
+  eventsService,
+  incomeService,
+  valuationService,
+  aiContextService,
+  dataQualityService,
+  logosService
+});
 const scheduler = new MonitorScheduler({
   repository,
   quotesService,
@@ -158,7 +169,8 @@ const server = createServer(createApp({
   dataQualityService,
   eventsService,
   incomeService,
-  valuationService
+  valuationService,
+  diagnosticsService
 }));
 scheduler.start();
 documentScheduler.start();

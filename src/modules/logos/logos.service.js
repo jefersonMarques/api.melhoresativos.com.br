@@ -17,7 +17,7 @@ export class LogosService {
   async getLogo(symbol, { forceRefresh = false } = {}) {
     const cached = await this.repository.getAssetLogo(symbol);
 
-    if (!forceRefresh && cached && isFresh(cached.checkedAt, this.config.logoTtlMs)) {
+    if (!forceRefresh && cached && isUsableCachedLogo(cached, this.config.logoTtlMs)) {
       return cached;
     }
 
@@ -125,7 +125,7 @@ export class LogosService {
       }
 
       const svgContent = await this.#downloadSvg(logoUrl);
-      if (!svgContent) {
+      if (!svgContent || isGenericBrapiSvg(svgContent)) {
         return null;
       }
 
@@ -189,6 +189,18 @@ function isFresh(timestamp, ttlMs) {
   return Date.now() - new Date(timestamp).getTime() < ttlMs;
 }
 
+function isUsableCachedLogo(logo, ttlMs) {
+  if (!isFresh(logo.checkedAt, ttlMs)) {
+    return false;
+  }
+
+  if (logo.source === BRAPI_LOGO_SOURCE && isGenericBrapiSvg(logo.svgContent)) {
+    return false;
+  }
+
+  return true;
+}
+
 function shouldSyncMarketLogo(logo, ttlMs) {
   if (!logo) {
     return true;
@@ -198,5 +210,16 @@ function shouldSyncMarketLogo(logo, ttlMs) {
     return true;
   }
 
+  if (logo.source === BRAPI_LOGO_SOURCE && isGenericBrapiSvg(logo.svgContent)) {
+    return true;
+  }
+
   return !isFresh(logo.checkedAt, ttlMs);
+}
+
+function isGenericBrapiSvg(svgContent) {
+  const normalized = String(svgContent ?? '').toLowerCase();
+  return normalized.includes('<title>brapi</title>')
+    || normalized.includes('brapi.dev')
+    || normalized.includes('logo oficial da brapi');
 }

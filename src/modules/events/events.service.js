@@ -58,10 +58,12 @@ export class EventsService {
          sentiment, dedup_key, metadata
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
        ON CONFLICT (symbol, dedup_key) DO UPDATE SET
+         event_type = EXCLUDED.event_type,
          title = EXCLUDED.title,
          event_date = EXCLUDED.event_date,
          published_at = EXCLUDED.published_at,
          reference_date = EXCLUDED.reference_date,
+         source_document_id = EXCLUDED.source_document_id,
          source_url = EXCLUDED.source_url,
          summary = EXCLUDED.summary,
          raw_text = EXCLUDED.raw_text,
@@ -153,9 +155,10 @@ function extractIncomeFromDocument(document) {
     document,
     amount,
     incomeType: inferIncomeType(document, rawText),
-    comDate: findDateByLabels(rawText, ['data com', 'com direito', 'posição', 'posicao', 'cotistas em']),
+    comDate: findDateByLabels(rawText, ['data-base', 'data base', 'data com', 'com direito', 'posição', 'posicao', 'cotistas em']),
     exDate: findDateByLabels(rawText, ['data ex', 'ex-rendimento', 'ex rendimento', 'ex-dividendo', 'ex dividendo', 'a partir de']),
     paymentDate: findDateByLabels(rawText, ['pagamento', 'data do pagamento', 'data de pagamento']),
+    referenceDate: findReferencePeriod(rawText) ?? document.referenceDate,
     extractionMethod: 'document_text_pattern'
   })];
 }
@@ -267,10 +270,14 @@ function inferImportance(eventType) {
 }
 
 function createEventDedupKey(event) {
+  if (event.source && event.sourceDocumentId) {
+    return [event.source, event.sourceDocumentId].join(':');
+  }
+
   return [
     event.eventType,
-    event.source,
-    event.sourceDocumentId ?? event.title,
+    event.source ?? '',
+    event.title,
     event.referenceDate ?? event.eventDate ?? event.publishedAt ?? ''
   ].join(':');
 }
@@ -309,8 +316,8 @@ function findIncomeAmount(text) {
   if (!text) return null;
   const patterns = [
     /R\$\s*([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})\s*(?:por\s+cota|por\s+quota|\/\s*cota)/i,
-    /(?:valor\s+(?:do\s+)?(?:rendimento|provento|amortizacao|amortização))[^\n]{0,100}?R\$\s*([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})/i,
-    /(?:rendimento|provento|amortizacao|amortização)[^\n]{0,100}?([0-9]+,[0-9]{4,8})/i
+    /(?:valor\s+(?:do\s+)?(?:rendimento|provento|amortizacao|amortização))[\s\S]{0,180}?(?:R\$\s*)?([0-9]+(?:\.[0-9]{3})*,[0-9]{2,8})/i,
+    /(?:rendimento|provento|amortizacao|amortização)[\s\S]{0,180}?([0-9]+,[0-9]{2,8})/i
   ];
 
   for (const pattern of patterns) {
@@ -325,16 +332,42 @@ function findIncomeAmount(text) {
 function findDateByLabels(text, labels) {
   if (!text) return null;
   for (const label of labels) {
-    const pattern = new RegExp(`${escapeRegex(label)}[\\s\\S]{0,140}?(\\d{2}\\/\\d{2}\\/\\d{4})`, 'i');
+    const pattern = new RegExp(`${escapeRegex(label)}[\\s\\S]{0,180}?(\\d{2}\\/\\d{2}\\/\\d{4})`, 'i');
     const match = text.match(pattern);
     if (match) return parseBrazilianDate(match[1]);
   }
   return null;
 }
 
+function findReferencePeriod(text) {
+  if (!text) return null;
+  const normalized = normalizeText(text)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  const patterns = [
+    /periodo\s+de\s+referencia[\s\S]{0,140}?([a-z]+)\s*\/\s*(\d{4})/i,
+    /periodo\s+de\s+referencia[\s\S]{0,140}?([a-z]+)\s+de\s+(\d{4})/i,
+    /competencia[\s\S]{0,140}?([a-z]+)\s*\/\s*(\d{4})/i,
+    /referencia[\s\S]{0,140}?([a-z]+)\s*\/\s*(\d{4})/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+    const month = monthNumber(match[1]);
+    if (month) return `${match[2]}-${month}-01`;
+  }
+
+  return null;
+}
+
 function inferIncomeType(document, text) {
-  const value = `${document.title} ${text ?? ''}`.toLowerCase();
-  return value.includes('amortiza') ? 'amortization' : 'dividend';
+  const content = String(text ?? '').toLowerCase();
+  if (/valor\s+do\s+rendimento[\s\S]{0,120}?(?:r\$\s*)?[0-9]+,[0-9]{2,8}/i.test(content)) return 'dividend';
+  if (/valor\s+(?:da\s+)?amortiza[\s\S]{0,120}?(?:r\$\s*)?[0-9]+,[0-9]{2,8}/i.test(content)) return 'amortization';
+  const value = `${document.title} ${content}`.toLowerCase();
+  return value.includes('amortiza') && !value.includes('rendimento') ? 'amortization' : 'dividend';
 }
 
 function parseBrazilianNumber(value) {
@@ -366,6 +399,14 @@ function parseAnyDate(value) {
 function parseBrazilianDate(value) {
   const match = value?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+function monthNumber(value) {
+  const months = {
+    janeiro: '01', fevereiro: '02', marco: '03', março: '03', abril: '04', maio: '05', junho: '06',
+    julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12'
+  };
+  return months[String(value ?? '').toLowerCase()] ?? null;
 }
 
 function normalizeKey(value) {

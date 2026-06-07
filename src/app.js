@@ -15,7 +15,8 @@ export function createApp({
   dataQualityService = null,
   eventsService = null,
   incomeService = null,
-  valuationService = null
+  valuationService = null,
+  diagnosticsService = null
 }) {
   const limiter = createRateLimiter(config.rateLimitWindowMs, config.rateLimitMaxRequests);
 
@@ -40,6 +41,26 @@ export function createApp({
           service: "market-data-api",
           timestamp: new Date().toISOString()
         });
+      }
+
+      if (diagnosticsService && request.method === "GET" && url.pathname === "/api/diagnostics/assets") {
+        const requestedSymbols = url.searchParams.get("symbols");
+        const symbols = requestedSymbols ? parseSymbols(requestedSymbols, config.maxTickers) : await repository.listMonitored();
+        if (!symbols.length) {
+          throw new AppError(400, "BAD_REQUEST", "Informe symbols ou monitore ativos antes de executar o diagnóstico");
+        }
+        return sendJson(response, 200, await diagnosticsService.checkMany(symbols));
+      }
+
+      if (diagnosticsService && request.method === "POST" && url.pathname === "/api/diagnostics/assets") {
+        const body = await readJsonBody(request);
+        const symbols = Array.isArray(body.symbols) && body.symbols.length
+          ? parseSymbols(body.symbols.join(","), config.maxTickers)
+          : await repository.listMonitored();
+        if (!symbols.length) {
+          throw new AppError(400, "BAD_REQUEST", "Informe symbols ou monitore ativos antes de executar o diagnóstico");
+        }
+        return sendJson(response, 200, await diagnosticsService.checkMany(symbols));
       }
 
       const quoteMatch = url.pathname.match(/^\/api\/quote\/([^/]+)$/);

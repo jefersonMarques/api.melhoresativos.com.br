@@ -74,11 +74,14 @@ export class IncomeService {
          reference_date, declared_at, source, source_document_id, source_url, dedup_key, metadata
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
        ON CONFLICT (symbol, dedup_key) DO UPDATE SET
+         income_type = EXCLUDED.income_type,
+         amount = EXCLUDED.amount,
          com_date = EXCLUDED.com_date,
          ex_date = EXCLUDED.ex_date,
          payment_date = EXCLUDED.payment_date,
          reference_date = EXCLUDED.reference_date,
          declared_at = EXCLUDED.declared_at,
+         source_document_id = EXCLUDED.source_document_id,
          source_url = EXCLUDED.source_url,
          metadata = market_data_asset_income.metadata || EXCLUDED.metadata,
          updated_at = NOW()
@@ -129,12 +132,14 @@ function sumSince(income, months) {
 }
 
 function createIncomeDedupKey(value) {
+  if (value.source && value.sourceDocumentId) {
+    return [value.source, value.sourceDocumentId].join(':');
+  }
+
   return [
-    value.incomeType,
     value.amount,
     value.paymentDate ?? value.referenceDate ?? value.comDate ?? '',
-    value.source,
-    value.sourceDocumentId ?? ''
+    value.source ?? ''
   ].join(':');
 }
 

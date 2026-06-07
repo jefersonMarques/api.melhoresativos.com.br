@@ -117,6 +117,8 @@ Accept: application/json
 @fiiSecondarySymbol = IRDM11
 @documentId = 1
 @fnetDocumentId = 1198836
+@fnetHtmlIncomeDocumentId = 1207791
+@fnetPdfDocumentId = 1207798
 
 ### Indicadores complementares obtidos do Fundamentus
 GET {{baseUrl}}/api/fundamentals/{{fiiSymbol}}
@@ -151,7 +153,7 @@ GET {{baseUrl}}/api/documents/{{fiiSymbol}}/{{documentId}}
 Accept: application/json
 
 
-### Listar somente PDFs oficiais obtidos do FundosNet/B3
+### Listar documentos oficiais obtidos do FundosNet/B3
 GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3
 Accept: application/json
 
@@ -164,16 +166,18 @@ GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3&type=ma
 Accept: application/json
 
 ### ------------------------------------------------------------
-### Diagnóstico manual de PDF FundosNet/B3
+### Diagnóstico manual de documentos FundosNet/B3
 ### ------------------------------------------------------------
 ### Uso:
 ### 1. Execute a sincronização de documentos acima.
-### 2. Liste os PDFs do FundosNet/B3 e verifique processingStatus, processingError e extractionStatus.
+### 2. Liste os documentos do FundosNet/B3 e verifique mimeType, processingStatus, processingError e extractionStatus.
 ### 3. Abra um documento específico usando o id interno retornado pela API.
-### 4. Se processingError indicar "PDF extractor not available: pdftotext", instale/configure Poppler.
-### 5. Se o link oficial retornar HTML ou página "Sistema indisponível", a falha é temporária da fonte externa.
+### 4. O mesmo endpoint da FNET pode retornar PDF real, HTML oficial de proventos ou HTML de manutenção.
+### 5. PDF real deve iniciar com %PDF e será extraído via pdftotext.
+### 6. HTML oficial de proventos deve ser salvo como text/html e classificado como income_announcement.
+### 7. HTML de manutenção, como Sistema indisponível, deve ser rejeitado e não deve gravar conteúdo extraído.
 
-### Sincronizar apenas o FII usado no diagnóstico de PDF
+### Sincronizar apenas o FII usado no diagnóstico de documentos
 POST {{baseUrl}}/api/documents/sync
 Content-Type: application/json
 Accept: application/json
@@ -182,7 +186,7 @@ Accept: application/json
   "symbols": ["{{fiiSymbol}}"]
 }
 
-### Verificar status dos PDFs oficiais do FundosNet/B3
+### Verificar status dos documentos oficiais do FundosNet/B3
 GET {{baseUrl}}/api/documents/{{fiiSymbol}}?limit=20&source=fundosnet_b3
 Accept: application/json
 
@@ -191,10 +195,18 @@ Accept: application/json
 GET {{baseUrl}}/api/documents/{{fiiSymbol}}/{{documentId}}
 Accept: application/json
 
-### Testar URL oficial do PDF no FundosNet/B3 pelo REST Client
-### O retorno esperado para PDF válido deve ter Content-Type application/pdf e corpo iniciando com %PDF.
-### Se retornar text/html ou página "Sistema indisponível", aguarde a fonte externa voltar.
+### Testar URL oficial genérica do FundosNet/B3 pelo REST Client
 GET https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?cvm=true&id={{fnetDocumentId}}
+Accept: application/pdf,text/html;q=0.9,*/*;q=0.8
+
+### Testar HTML oficial de proventos no FundosNet/B3
+### Esperado: text/html com título Informações sobre Pagamento de Proventos.
+GET https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?cvm=true&id={{fnetHtmlIncomeDocumentId}}
+Accept: application/pdf,text/html;q=0.9,*/*;q=0.8
+
+### Testar PDF oficial no FundosNet/B3
+### Esperado: application/pdf ou corpo iniciando com %PDF.
+GET https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?cvm=true&id={{fnetPdfDocumentId}}
 Accept: application/pdf,text/html;q=0.9,*/*;q=0.8
 
 ### ------------------------------------------------------------
