@@ -34,7 +34,8 @@ export class AssetDiagnosticsService {
 
   async check(symbol) {
     const normalizedSymbol = normalizeSymbol(symbol);
-    const checks = {
+    const assetType = inferAssetType(normalizedSymbol);
+    const checks = applyAssetTypePolicy(assetType, {
       quote: await this.#checkQuote(normalizedSymbol),
       fundamentals: await this.#checkFundamentals(normalizedSymbol),
       documents: await this.#checkDocuments(normalizedSymbol),
@@ -44,12 +45,13 @@ export class AssetDiagnosticsService {
       aiContext: await this.#checkAiContext(normalizedSymbol),
       dataQuality: await this.#checkDataQuality(normalizedSymbol),
       logo: await this.#checkLogo(normalizedSymbol)
-    };
+    });
 
     return {
       symbol: normalizedSymbol,
+      assetType,
       status: resolveAssetStatus(checks),
-      score: calculateScore(checks),
+      score: calculateScore(checks, assetType),
       checks
     };
   }
@@ -156,55 +158,126 @@ export class AssetDiagnosticsService {
       return {
         status: 'error',
         message: error instanceof Error ? error.message : `Falha desconhecida em ${name}.`,
-        details: {}
+        details: {},
+        applicability: 'required'
       };
     }
   }
 }
 
 function ok(details = {}) {
-  return { status: 'ok', message: 'OK', details };
+  return { status: 'ok', message: 'OK', details, applicability: 'required' };
 }
 
 function warning(message, details = {}) {
-  return { status: 'warning', message, details };
+  return { status: 'warning', message, details, applicability: 'required' };
 }
 
 function missing(message, details = {}) {
-  return { status: 'missing', message, details };
+  return { status: 'missing', message, details, applicability: 'required' };
+}
+
+function optional(check, message) {
+  if (check.status === 'ok' || check.status === 'error') return check;
+  return {
+    ...check,
+    status: 'optional',
+    message,
+    applicability: 'optional'
+  };
 }
 
 function normalizeSymbol(symbol) {
   return String(symbol ?? '').trim().toUpperCase();
 }
 
+function inferAssetType(symbol) {
+  if (/^[A-Z]{4}11$/.test(symbol)) return 'fii';
+  if (/^[A-Z]{4}\d{1,2}$/.test(symbol)) return 'stock';
+  return 'unknown';
+}
+
+function applyAssetTypePolicy(assetType, checks) {
+  if (assetType !== 'stock') {
+    return checks;
+  }
+
+  return {
+    ...checks,
+    documents: optional(checks.documents, 'Documentos oficiais normalizados ainda são opcionais para ações.'),
+    events: optional(checks.events, 'Eventos oficiais normalizados ainda são opcionais para ações.'),
+    income: optional(checks.income, 'Proventos normalizados ainda são opcionais para ações.'),
+    dataQuality: checks.dataQuality.status === 'warning'
+      ? { ...checks.dataQuality, message: 'Score de qualidade parcial esperado para ações sem camada documental completa.' }
+      : checks.dataQuality
+  };
+}
+
 function resolveAssetStatus(checks) {
-  const statuses = Object.values(checks).map((check) => check.status);
-  if (statuses.includes('error')) return 'error';
-  if (statuses.includes('missing')) return 'warning';
-  if (statuses.includes('warning')) return 'warning';
+  const requiredStatuses = Object.values(checks)
+    .filter((check) => check.applicability !== 'optional')
+    .map((check) => check.status);
+
+  if (requiredStatuses.includes('error')) return 'error';
+  if (requiredStatuses.includes('missing')) return 'warning';
+  if (requiredStatuses.includes('warning')) return 'warning';
   return 'ok';
 }
 
-function calculateScore(checks) {
-  const weights = {
-    quote: 16,
-    fundamentals: 10,
-    documents: 14,
-    events: 12,
-    income: 12,
-    valuation: 10,
-    aiContext: 10,
-    dataQuality: 10,
-    logo: 6
-  };
-
-  return Object.entries(weights).reduce((score, [key, weight]) => {
-    const status = checks[key]?.status;
-    if (status === 'ok') return score + weight;
+function calculateScore(checks, assetType) {
+  const weights = getWeightsForAssetType(assetType);
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  const rawScore = Object.entries(weights).reduce((score, [key, weight]) => {
+    const check = checks[key];
+    const status = check?.status;
+    if (status === 'ok' || status === 'optional') return score + weight;
     if (status === 'warning') return score + Math.floor(weight / 2);
     return score;
   }, 0);
+
+  return totalWeight ? Math.round((rawScore / totalWeight) * 100) : 0;
+}
+
+function getWeightsForAssetType(assetType) {
+  if (assetType === 'stock') {
+    return {
+      quote: 24,
+      fundamentals: 20,
+      valuation: 16,
+      aiContext: 14,
+      dataQuality: 10,
+      logo: 8,
+      documents: 3,
+      events: 3,
+      income: 2
+    };
+  }
+
+  if (assetType === 'fii') {
+    return {
+      quote: 16,
+      fundamentals: 10,
+      documents: 14,
+      events: 12,
+      income: 12,
+      valuation: 10,
+      aiContext: 10,
+      dataQuality: 10,
+      logo: 6
+    };
+  }
+
+  return {
+    quote: 22,
+    fundamentals: 18,
+    valuation: 16,
+    aiContext: 14,
+    dataQuality: 12,
+    logo: 8,
+    documents: 4,
+    events: 3,
+    income: 3
+  };
 }
 
 function summarizeResults(results) {
