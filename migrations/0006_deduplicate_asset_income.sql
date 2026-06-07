@@ -1,9 +1,3 @@
-UPDATE market_data_asset_income
-SET dedup_key = source || ':' || source_document_id
-WHERE source IS NOT NULL
-  AND source_document_id IS NOT NULL
-  AND source_document_id <> '';
-
 WITH ranked AS (
   SELECT
     id,
@@ -30,3 +24,9 @@ SET income_type = 'dividend',
 WHERE source = 'fundosnet_b3'
   AND income_type = 'amortization'
   AND metadata->>'sourceDocumentType' = 'income_announcement';
+
+UPDATE market_data_asset_income
+SET dedup_key = source || ':' || source_document_id
+WHERE source IS NOT NULL
+  AND source_document_id IS NOT NULL
+  AND source_document_id <> '';
