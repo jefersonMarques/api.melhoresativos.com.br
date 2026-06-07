@@ -17,29 +17,34 @@ export class FnetFiiProvider {
     for (const item of discovered.documents) {
       const officialUrl = `${this.baseUrl}/exibirDocumento?cvm=true&id=${encodeURIComponent(item.id)}`;
       try {
-        const pdf = await this.fetchBufferFn(officialUrl, { timeoutMs: this.timeoutMs, headers: { Accept: "application/pdf,*/*;q=0.8" } });
-        const invalidPdfContent = createInvalidPdfContent(pdf);
-        const content = invalidPdfContent ?? await this.pdfTextExtractor.extract(pdf);
+        const buffer = await this.fetchBufferFn(officialUrl, { timeoutMs: this.timeoutMs, headers: { Accept: "application/pdf,text/html,*/*;q=0.8" } });
+        const htmlContent = createOfficialHtmlContent(buffer);
+        const invalidPdfContent = htmlContent ? null : createInvalidPdfContent(buffer);
+        const content = htmlContent ?? invalidPdfContent ?? await this.pdfTextExtractor.extract(buffer);
+        const contentTitle = htmlContent?.metadata?.htmlTitle;
+        const title = isUsefulTitle(item.title, symbol) ? item.title : contentTitle ?? item.title;
+        const typeValue = [contentTitle, item.type, title].filter(Boolean).join(" ");
         documents.push({
           symbol,
           assetType: "fii",
-          documentType: mapDocumentType(item.type ?? item.title),
-          title: item.title,
+          documentType: mapDocumentType(typeValue),
+          title,
           referenceDate: item.referenceDate,
           publishedAt: item.publishedAt,
           source: "fundosnet_b3",
           sourceDocumentId: item.id,
           sourceUrl: officialUrl,
           downloadUrl: officialUrl,
-          mimeType: "application/pdf",
-          contentHash: invalidPdfContent ? null : createHash("sha256").update(pdf).digest("hex"),
+          mimeType: htmlContent ? "text/html" : "application/pdf",
+          contentHash: invalidPdfContent ? null : createHash("sha256").update(buffer).digest("hex"),
           metadata: {
             official: true,
             category: item.category,
             type: item.type,
             discoveryProvider: "brfiis_public_index",
             discoveryUrl: item.discoveryUrl,
-            discoveryOnly: true
+            discoveryOnly: true,
+            ...(htmlContent?.metadata ?? {})
           },
           processingStatus: content.extractionStatus === "failed" ? "failed" : content.extractionStatus,
           processingError: content.extractionError ?? null,
@@ -55,13 +60,41 @@ export class FnetFiiProvider {
 
 export function mapDocumentType(value = "") {
   const normalized = value.toLowerCase();
+  if (normalized.includes("pagamento de proventos") || normalized.includes("rendimento") || normalized.includes("amortiza")) return "income_announcement";
   if (normalized.includes("relatório gerencial") || normalized.includes("relatorio gerencial")) return "fii_management_report";
   if (normalized.includes("fato relevante")) return "material_fact";
   if (normalized.includes("comunicado")) return "market_announcement";
-  if (normalized.includes("rendimento") || normalized.includes("amortiza")) return "income_announcement";
   if (normalized.includes("subscr") || normalized.includes("emiss")) return "subscription_issuance";
   if (normalized.includes("assembleia")) return "shareholder_meeting";
   return "other_official_document";
+}
+
+function createOfficialHtmlContent(buffer) {
+  const text = buffer.toString("utf8", 0, Math.min(buffer.length, 300_000));
+  if (!looksLikeHtml(text)) return null;
+
+  const title = extractTitleFromText(text);
+  const normalizedTitle = title.toLowerCase();
+  const maintenanceTitles = ["sistema indisponível", "sistema indisponivel", "erro", "error"];
+  if (maintenanceTitles.some((value) => normalizedTitle.includes(value))) {
+    return null;
+  }
+
+  const rawText = normalizeHtmlText(stripHtml(text));
+  if (!rawText || !isOfficialFnetHtml(rawText, title)) {
+    return null;
+  }
+
+  return {
+    rawText,
+    extractionStatus: "extracted",
+    extractionError: null,
+    extractedAt: new Date().toISOString(),
+    metadata: {
+      htmlTitle: title,
+      htmlDocument: true
+    }
+  };
 }
 
 function createInvalidPdfContent(buffer) {
@@ -80,8 +113,28 @@ function createInvalidPdfContent(buffer) {
   };
 }
 
+function isUsefulTitle(title, symbol) {
+  const value = String(title ?? "").trim().toLowerCase();
+  return value && value !== `documento oficial ${String(symbol).toLowerCase()}`;
+}
+
+function looksLikeHtml(value) {
+  return value.trimStart().toLowerCase().startsWith("<html") || value.toLowerCase().includes("<body");
+}
+
+function isOfficialFnetHtml(rawText, title) {
+  const text = `${title}\n${rawText}`.toLowerCase();
+  return text.includes("informações sobre pagamento de proventos")
+    || text.includes("informacoes sobre pagamento de proventos")
+    || text.includes("nome do fundo")
+    || text.includes("código de negociação");
+}
+
 function extractTitle(buffer) {
-  const content = buffer.toString("utf8", 0, Math.min(buffer.length, 4000));
+  return extractTitleFromText(buffer.toString("utf8", 0, Math.min(buffer.length, 4000)));
+}
+
+function extractTitleFromText(content) {
   const normalized = content.toLowerCase();
   const opening = normalized.indexOf("<title>");
   const closing = normalized.indexOf("</title>");
@@ -92,12 +145,21 @@ function extractTitle(buffer) {
   return normalizeHtmlText(content.slice(opening + 7, closing));
 }
 
+function stripHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, "\n");
+}
+
 function normalizeHtmlText(value) {
-  return value
+  return String(value ?? "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, " ")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n+/g, "\n")
     .trim();
 }
